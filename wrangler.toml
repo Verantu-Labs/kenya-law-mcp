@@ -1,0 +1,11 @@
+name = "kenya-law-mcp"
+main = "src/worker.ts"
+compatibility_date = "2024-09-23"
+
+[vars]
+ENVIRONMENT = "production"
+
+# Optional Cloudflare KV namespace binding for edge caching
+# [[kv_namespaces]]
+# binding = "KENYA_LAW_CACHE"
+# id = "your-kv-namespace-id"

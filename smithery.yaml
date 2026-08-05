@@ -1,0 +1,8 @@
+# Smithery Configuration for @verantu-labs/kenya-law-mcp
+# https://smithery.ai
+
+startCommand:
+  type: stdio
+  config:
+    command: "npx"
+    args: ["-y", "@verantu-labs/kenya-law-mcp"]

@@ -1,0 +1,221 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Kenya Law Akoma Ntoso (AKN) API",
+    "description": "Deterministic API for Kenya statutes, case law, daily cause lists, and citators.",
+    "version": "0.2.0"
+  },
+  "servers": [
+    {
+      "url": "https://kenya-law-mcp.verantulabs.workers.dev",
+      "description": "Cloudflare Workers Edge Server"
+    }
+  ],
+  "paths": {
+    "/api/v1/get_akn_document": {
+      "post": {
+        "summary": "Fetches a raw Akoma Ntoso (AKN) legal document (Act, Judgment, or Legal Notice) by AKN URI or URL, converting XML tags into structured non-truncated Markdown with OSCOLA citations.",
+        "operationId": "get_akn_document",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "akn_url": {
+                    "type": "string",
+                    "description": "The Akoma Ntoso URI or URL (e.g. '/akn/ke/act/2010/4' or '/akn/ke/judgment/kehc/2026/8198')"
+                  }
+                },
+                "required": [
+                  "akn_url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response from Kenya Law AKN service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search_case_law": {
+      "post": {
+        "summary": "Stateless real-time search across Kenyan High Court, Court of Appeal, and Supreme Court judgments. Returns AKN URIs, case names, and neutral citations.",
+        "operationId": "search_case_law",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Legal issue or search keywords (e.g. 'unfair termination of employment')"
+                  },
+                  "court": {
+                    "type": "string",
+                    "description": "Court level filter (e.g. 'KESC', 'KECA', 'KEHC', 'KEELRC')"
+                  },
+                  "year_from": {
+                    "type": "number",
+                    "description": "Filter judgments delivered on or after this year (e.g. 2020)"
+                  },
+                  "limit": {
+                    "type": "number",
+                    "description": "Maximum results to return (default: 10, max: 50)"
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response from Kenya Law AKN service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search_legislation": {
+      "post": {
+        "summary": "Stateless search across Kenya Acts of Parliament and Legal Notices index (/akn/ke/act/). Returns AKN URIs to active revised statutes.",
+        "operationId": "search_legislation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "act_name": {
+                    "type": "string",
+                    "description": "Name or abbreviation of Act (e.g. 'Employment Act' or 'Data Protection')"
+                  },
+                  "limit": {
+                    "type": "number",
+                    "description": "Maximum results to return (default: 10, max: 50)"
+                  }
+                },
+                "required": [
+                  "act_name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response from Kenya Law AKN service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/get_cause_list": {
+      "post": {
+        "summary": "Retrieves daily court cause lists by court station (e.g. 'Milimani Law Courts', 'Mombasa', 'Eldoret') and date. Essential for litigators preparing for court hearings.",
+        "operationId": "get_cause_list",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "court_station": {
+                    "type": "string",
+                    "description": "Court station name (e.g. 'Milimani Law Courts' or 'High Court at Eldoret')"
+                  },
+                  "date": {
+                    "type": "string",
+                    "description": "Hearing date in YYYY-MM-DD format (defaults to current date)"
+                  }
+                },
+                "required": [
+                  "court_station"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response from Kenya Law AKN service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/check_citator": {
+      "post": {
+        "summary": "Extracts subsequent history and citing references for a precedent (Is it still good law? Check followed, distinguished, or overruled status).",
+        "operationId": "check_citator",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "case_akn_url": {
+                    "type": "string",
+                    "description": "The AKN URI or neutral citation of the target case"
+                  }
+                },
+                "required": [
+                  "case_akn_url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response from Kenya Law AKN service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

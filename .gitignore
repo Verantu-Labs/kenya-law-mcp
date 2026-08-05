@@ -1,0 +1,4 @@
+data/*.db-shm
+data/*.db-wal
+node_modules/
+dist/
