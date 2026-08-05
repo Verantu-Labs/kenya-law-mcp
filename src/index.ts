@@ -5,13 +5,12 @@
  * Transport: Stdio (spawned by local AI agents, Claude Desktop, Cursor, Windsurf, or Solon Desktop).
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  type Tool,
-} from "@modelcontextprotocol/sdk/types.js";
+import { Server } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { ToolSchema } from "@modelcontextprotocol/core";
+import { z } from "zod";
+
+export type Tool = z.infer<typeof ToolSchema>;
 
 import { getAknDocument } from "./tools/get-akn-document.js";
 import { searchCaseLaw } from "./tools/search-case-law.js";
@@ -150,11 +149,11 @@ export function createMcpServer() {
     }
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
+  server.setRequestHandler("tools/list", async () => {
     return { tools: TOOLS };
   });
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler("tools/call", async (request, _ctx) => {
     const { name, arguments: args = {} } = request.params;
 
     switch (name) {

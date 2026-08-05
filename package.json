@@ -26,7 +26,8 @@
     "inspector": "npx @modelcontextprotocol/inspector bun run src/index.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.15.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@modelcontextprotocol/core": "^2.0.0",
     "fast-xml-parser": "^4.5.0"
   },
   "devDependencies": {
