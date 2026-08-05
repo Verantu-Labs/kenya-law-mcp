@@ -148,14 +148,14 @@ export class KenyaLawClient {
 
     try {
       const encodedQuery = encodeURIComponent(query);
-      const searchUrl = `${BASE_URL}/caselaw/cases/search?search_words=${encodedQuery}`;
+      const searchUrl = `${NEW_BASE_URL}/judgments/?q=${encodedQuery}`;
 
       const response = await fetch(searchUrl, {
         headers: {
-          "User-Agent": "VerantuLabs-KenyaLaw-MCP/1.0 (+https://verantulabs.com)",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           Accept: "text/html, */*",
         },
-        signal: AbortSignal.timeout(4000),
+        signal: AbortSignal.timeout(5000),
       });
 
       if (!response.ok) return [];
@@ -163,33 +163,30 @@ export class KenyaLawClient {
       const html = await response.text();
       const results: CaseSearchResult[] = [];
 
-      const linkRegex = /<a\s+[^>]*href=["'](http:\/\/kenyalaw\.org\/caselaw\/cases\/view\/([^"']+))["'][^>]*>(.*?)<\/a>/gi;
+      const linkRegex = /<a\s+[^>]*href=["'](\/akn\/ke\/judgment\/([^"']+))["'][^>]*>(.*?)<\/a>/gi;
       let match: RegExpExecArray | null;
 
       while ((match = linkRegex.exec(html)) !== null && results.length < limit) {
-        const fullUrl = match[1];
-        const caseId = match[2];
-        const rawTitle = match[3].replace(/<[^>]+>/g, "").trim();
+        const aknPath = match[1].trim();
+        const rawTitle = match[3].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 
         if (!rawTitle || rawTitle.toLowerCase().includes("next") || rawTitle.toLowerCase().includes("previous")) {
           continue;
         }
 
-        const citMatch = rawTitle.match(/\[\d{4}\]\s+(?:eKLR|KE[A-Z]+\s+\d+)/i);
+        const citMatch = rawTitle.match(/\[\d{4}\]\s*(?:eKLR|KE[A-Z0-9]+\s+\d+)/i);
         const neutralCitation = citMatch ? citMatch[0] : undefined;
 
-        // Construct AKN URI format: /akn/ke/judgment/{court}/{year}/{id}
         const yearMatch = rawTitle.match(/\[(\d{4})\]/);
         const year = yearMatch ? parseInt(yearMatch[1], 10) : yearFrom || new Date().getFullYear();
-        const aknUrl = `/akn/ke/judgment/${court ? court.toLowerCase() : "kehc"}/${year}/${caseId}`;
 
         results.push({
           case_title: rawTitle,
           neutral_citation: neutralCitation,
-          court: court || "High Court of Kenya",
+          court: court || "Kenya Courts",
           year,
-          akn_url: aknUrl,
-          url: fullUrl,
+          akn_url: aknPath,
+          url: `${NEW_BASE_URL}${aknPath}`,
           source: "kenyalaw.org",
           oscola_citation: neutralCitation ? `${rawTitle}` : `${rawTitle} (Kenya Law)`,
         });
@@ -215,14 +212,14 @@ export class KenyaLawClient {
 
     try {
       const encodedQuery = encodeURIComponent(actName);
-      const searchUrl = `${BASE_URL}/kl/index.php?id=106&search_words=${encodedQuery}`;
+      const searchUrl = `${NEW_BASE_URL}/acts/?q=${encodedQuery}`;
 
       const response = await fetch(searchUrl, {
         headers: {
-          "User-Agent": "VerantuLabs-KenyaLaw-MCP/1.0 (+https://verantulabs.com)",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           Accept: "text/html, */*",
         },
-        signal: AbortSignal.timeout(4000),
+        signal: AbortSignal.timeout(5000),
       });
 
       if (!response.ok) return [];
@@ -230,28 +227,23 @@ export class KenyaLawClient {
       const html = await response.text();
       const results: StatuteSearchResult[] = [];
 
-      const actRegex = /<a\s+[^>]*href=["']([^"']*id=\d+[^"']*)["'][^>]*>(.*?)<\/a>/gi;
+      const linkRegex = /<a\s+[^>]*href=["'](\/akn\/ke\/act\/([^"']+))["'][^>]*>(.*?)<\/a>/gi;
       let match: RegExpExecArray | null;
 
-      while ((match = actRegex.exec(html)) !== null && results.length < limit) {
-        const fullUrl = match[1];
-        const rawTitle = match[2].replace(/<[^>]+>/g, "").trim();
+      while ((match = linkRegex.exec(html)) !== null && results.length < limit) {
+        const aknPath = match[1].trim();
+        const rawTitle = match[3].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 
-        if (!rawTitle || rawTitle.length < 5) continue;
+        if (!rawTitle) continue;
 
-        const yearMatch = rawTitle.match(/(?:Act|Cap)\.?\s*(?:No\.\s*\d+\s+of\s+)?(\d{4})/i);
+        const yearMatch = aknPath.match(/\/act\/(\d{4})\//);
         const year = yearMatch ? parseInt(yearMatch[1], 10) : undefined;
-        const numMatch = rawTitle.match(/No\.\s*(\d+)/i);
-        const actNum = numMatch ? numMatch[1] : "1";
-
-        const aknUrl = `/akn/ke/act/${year || "2010"}/${actNum}`;
 
         results.push({
           short_title: rawTitle,
           year,
-          act_number: actNum,
-          akn_url: aknUrl,
-          url: fullUrl.startsWith("http") ? fullUrl : `${BASE_URL}/${fullUrl.replace(/^\//, "")}`,
+          akn_url: aknPath,
+          url: `${NEW_BASE_URL}${aknPath}`,
           source: "kenyalaw.org",
         });
       }
