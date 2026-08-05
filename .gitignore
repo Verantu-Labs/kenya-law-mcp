@@ -1,4 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+out/
+
+# Cloudflare Wrangler
+.wrangler/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local databases & storage
+data/*.db
 data/*.db-shm
 data/*.db-wal
-node_modules/
-dist/
+*.sqlite
+*.sqlite3
+
+# Logs & temp
+*.log
+logs/
+.tmp/
+tmp/
+coverage/
+.cache/
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

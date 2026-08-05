@@ -216,6 +216,47 @@
           }
         }
       }
+    },
+    "/api/v1/search_gazettes": {
+      "post": {
+        "summary": "Stateless real-time search across official Kenya Gazette notices (land title notices, government appointments, probate notices, tribunal decisions).",
+        "operationId": "search_gazettes",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Search keyword or gazette notice issue (e.g. 'gazette notice land title' or 'probate')"
+                  },
+                  "limit": {
+                    "type": "number",
+                    "description": "Maximum results to return (default: 10, max: 50)"
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response from Kenya Law AKN service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

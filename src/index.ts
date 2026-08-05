@@ -18,6 +18,7 @@ import { searchCaseLaw } from "./tools/search-case-law.js";
 import { searchLegislation } from "./tools/search-legislation.js";
 import { getCauseList } from "./tools/get-cause-list.js";
 import { checkCitator } from "./tools/check-citator.js";
+import { searchGazettes } from "./tools/search-gazettes.js";
 
 export const TOOLS: Tool[] = [
   {
@@ -115,6 +116,25 @@ export const TOOLS: Tool[] = [
       required: ["case_akn_url"],
     },
   },
+  {
+    name: "search_gazettes",
+    description:
+      "Stateless real-time search across official Kenya Gazette notices (land title notices, government appointments, probate notices, tribunal decisions).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search keyword or gazette notice issue (e.g. 'gazette notice land title' or 'probate')",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum results to return (default: 10, max: 50)",
+        },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 export function createMcpServer() {
@@ -148,9 +168,16 @@ export function createMcpServer() {
         return getCauseList(args as any);
       case "check_citator":
         return checkCitator(args as any);
+      case "search_gazettes":
+        return searchGazettes(args as any);
       default:
         return {
-          content: [{ type: "text", text: `Unknown tool: ${name}` }],
+          content: [
+            {
+              type: "text",
+              text: `Unknown tool '${name}'. Available tools are: get_akn_document, search_case_law, search_legislation, get_cause_list, check_citator, search_gazettes.`,
+            },
+          ],
           isError: true,
         };
     }
@@ -213,6 +240,9 @@ export async function handleStatelessMcpRequest(
         break;
       case "check_citator":
         toolResult = await checkCitator(toolArgs);
+        break;
+      case "search_gazettes":
+        toolResult = await searchGazettes(toolArgs);
         break;
       default:
         return {

@@ -7,14 +7,15 @@ import { checkCitator } from "../tools/check-citator.js";
 import { TOOLS, handleStatelessMcpRequest } from "../index.js";
 
 describe("Akoma Ntoso MCP Tools Interface", () => {
-  test("defines 5 core stateless AKN tools", () => {
-    expect(TOOLS.length).toBe(5);
+  test("defines 6 core stateless AKN tools", () => {
+    expect(TOOLS.length).toBe(6);
     const toolNames = TOOLS.map((t) => t.name);
     expect(toolNames).toContain("get_akn_document");
     expect(toolNames).toContain("search_case_law");
     expect(toolNames).toContain("search_legislation");
     expect(toolNames).toContain("get_cause_list");
     expect(toolNames).toContain("check_citator");
+    expect(toolNames).toContain("search_gazettes");
   });
 
   test("get_akn_document returns valid structure", async () => {
@@ -64,7 +65,7 @@ describe("2026-07-28 Stateless MCP Specification Handler", () => {
   test("handles tools/list statelessly", async () => {
     const res = await handleStatelessMcpRequest({ id: 2, method: "tools/list" });
     expect(res.jsonrpc).toBe("2.0");
-    expect(res.result.tools.length).toBe(5);
+    expect(res.result.tools.length).toBe(6);
   });
 
   test("handles tools/call statelessly with parameters", async () => {

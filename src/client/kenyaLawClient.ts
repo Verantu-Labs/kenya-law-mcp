@@ -342,4 +342,54 @@ export class KenyaLawClient {
     queryCache.set(cacheKey, { timestamp: now, data: citResult });
     return citResult;
   }
+
+  /**
+   * Real-time search across Kenya Gazette notices (land title notices, appointments, probate notices).
+   */
+  static async searchGazettes(query: string, limit: number = 10): Promise<Array<{ title: string; url: string; date?: string; source: string }>> {
+    const cacheKey = `gazette_${query}_${limit}`;
+    const now = Date.now();
+    const cached = queryCache.get(cacheKey);
+    if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+      return cached.data;
+    }
+
+    try {
+      const encodedQuery = encodeURIComponent(query);
+      const gazetteUrl = `${BASE_URL}/kenyagazette/cases/search?search_words=${encodedQuery}`;
+
+      const response = await fetch(gazetteUrl, {
+        headers: {
+          "User-Agent": "VerantuLabs-KenyaLaw-MCP/1.0 (+https://verantulabs.com)",
+          Accept: "text/html, */*",
+        },
+        signal: AbortSignal.timeout(4000),
+      });
+
+      if (!response.ok) return [];
+
+      const html = await response.text();
+      const results: Array<{ title: string; url: string; date?: string; source: string }> = [];
+
+      const linkRegex = /<a\s+[^>]*href=["'](http:\/\/kenyalaw\.org\/kenyagazette\/[^"']+)["'][^>]*>(.*?)<\/a>/gi;
+      let match: RegExpExecArray | null;
+
+      while ((match = linkRegex.exec(html)) !== null && results.length < limit) {
+        const url = match[1];
+        const rawTitle = match[2].replace(/<[^>]+>/g, "").trim();
+        if (rawTitle && rawTitle.length > 5) {
+          results.push({
+            title: rawTitle,
+            url,
+            source: "kenyalaw.org/kenyagazette",
+          });
+        }
+      }
+
+      queryCache.set(cacheKey, { timestamp: now, data: results });
+      return results;
+    } catch (_err) {
+      return [];
+    }
+  }
 }
