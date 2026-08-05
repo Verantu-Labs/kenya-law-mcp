@@ -32,7 +32,8 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "wrangler": "^4.119.0"
   },
   "license": "MIT"
 }

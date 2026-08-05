@@ -272,7 +272,7 @@ async function main() {
 }
 
 // Only start stdio listener if executed directly via CLI
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("dist/index.js")) {
+if (typeof process !== "undefined" && (import.meta.url === `file://${process.argv?.[1]}` || process.argv?.[1]?.endsWith("dist/index.js"))) {
   main().catch((err) => {
     console.error("Fatal error starting kenya-law-mcp server:", err);
     process.exit(1);
