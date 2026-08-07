@@ -64,78 +64,6 @@ export interface CitatorResult {
   }>;
 }
 
-export const BUILTIN_STATUTES_INDEX: StatuteSearchResult[] = [
-  { short_title: "The Constitution of Kenya, 2010", year: 2010, act_number: "Constitution", akn_url: "/akn/ke/act/2010/constitution", url: "https://new.kenyalaw.org/akn/ke/act/2010/constitution", source: "kenyalaw.org" },
-  { short_title: "Employment Act", year: 2007, act_number: "No. 11 of 2007", akn_url: "/akn/ke/act/2007/11/eng@2024-04-26", url: "https://new.kenyalaw.org/akn/ke/act/2007/11/eng@2024-04-26", source: "kenyalaw.org" },
-  { short_title: "The Employment (General) Rules", year: 2014, act_number: "L.N. 28/2014", akn_url: "/akn/ke/act/ln/2014/28/eng@2022-12-31", url: "https://new.kenyalaw.org/akn/ke/act/ln/2014/28/eng@2022-12-31", source: "kenyalaw.org" },
-  { short_title: "Employment and Labour Relations Court Act", year: 2011, act_number: "No. 20 of 2011", akn_url: "/akn/ke/act/2011/20/eng@2022-12-31", url: "https://new.kenyalaw.org/akn/ke/act/2011/20/eng@2022-12-31", source: "kenyalaw.org" },
-  { short_title: "Data Protection Act", year: 2019, act_number: "No. 24 of 2019", akn_url: "/akn/ke/act/2019/24", url: "https://new.kenyalaw.org/akn/ke/act/2019/24", source: "kenyalaw.org" },
-  { short_title: "Companies Act", year: 2015, act_number: "No. 17 of 2015", akn_url: "/akn/ke/act/2015/17", url: "https://new.kenyalaw.org/akn/ke/act/2015/17", source: "kenyalaw.org" },
-  { short_title: "Land Act", year: 2012, act_number: "No. 6 of 2012", akn_url: "/akn/ke/act/2012/6", url: "https://new.kenyalaw.org/akn/ke/act/2012/6", source: "kenyalaw.org" },
-  { short_title: "Land Registration Act", year: 2012, act_number: "No. 3 of 2012", akn_url: "/akn/ke/act/2012/3", url: "https://new.kenyalaw.org/akn/ke/act/2012/3", source: "kenyalaw.org" },
-  { short_title: "Penal Code", year: 2012, act_number: "Cap 63", akn_url: "/akn/ke/act/1930/cap63", url: "https://new.kenyalaw.org/akn/ke/act/1930/cap63", source: "kenyalaw.org" },
-  { short_title: "Criminal Procedure Code", year: 2012, act_number: "Cap 75", akn_url: "/akn/ke/act/1930/cap75", url: "https://new.kenyalaw.org/akn/ke/act/1930/cap75", source: "kenyalaw.org" },
-  { short_title: "Civil Procedure Act", year: 2010, act_number: "Cap 21", akn_url: "/akn/ke/act/1924/cap21", url: "https://new.kenyalaw.org/akn/ke/act/1924/cap21", source: "kenyalaw.org" },
-  { short_title: "Evidence Act", year: 2014, act_number: "Cap 80", akn_url: "/akn/ke/act/1963/cap80", url: "https://new.kenyalaw.org/akn/ke/act/1963/cap80", source: "kenyalaw.org" },
-  { short_title: "Law of Contract Act", year: 2012, act_number: "Cap 23", akn_url: "/akn/ke/act/1961/cap23", url: "https://new.kenyalaw.org/akn/ke/act/1961/cap23", source: "kenyalaw.org" },
-  { short_title: "Tax Procedures Act", year: 2015, act_number: "No. 29 of 2015", akn_url: "/akn/ke/act/2015/29", url: "https://new.kenyalaw.org/akn/ke/act/2015/29", source: "kenyalaw.org" },
-  { short_title: "Value Added Tax Act", year: 2013, act_number: "No. 35 of 2013", akn_url: "/akn/ke/act/2013/35", url: "https://new.kenyalaw.org/akn/ke/act/2013/35", source: "kenyalaw.org" },
-  { short_title: "Fair Administrative Action Act", year: 2015, act_number: "No. 4 of 2015", akn_url: "/akn/ke/act/2015/4", url: "https://new.kenyalaw.org/akn/ke/act/2015/4", source: "kenyalaw.org" },
-];
-
-export const BUILTIN_CASES_INDEX: CaseSearchResult[] = [
-  {
-    case_title: "Raila Amolo Odinga & another v Independent Electoral and Boundaries Commission & 2 others [2017] eKLR",
-    neutral_citation: "[2017] eKLR",
-    court: "Supreme Court of Kenya",
-    year: 2017,
-    akn_url: "/akn/ke/judgment/kesc/2017/1",
-    url: "https://new.kenyalaw.org/akn/ke/judgment/kesc/2017/1",
-    source: "kenyalaw.org",
-    oscola_citation: "Raila Odinga v IEBC [2017] eKLR (Supreme Court of Kenya)",
-  },
-  {
-    case_title: "Attorney General & 2 others v David Ndii & 79 others (BBI Case) [2022] KESC 8 (KLR)",
-    neutral_citation: "[2022] KESC 8",
-    court: "Supreme Court of Kenya",
-    year: 2022,
-    akn_url: "/akn/ke/judgment/kesc/2022/8",
-    url: "https://new.kenyalaw.org/akn/ke/judgment/kesc/2022/8",
-    source: "kenyalaw.org",
-    oscola_citation: "AG v Ndii (BBI Case) [2022] KESC 8 (KLR)",
-  },
-  {
-    case_title: "Dina Management Limited v County Government of Mombasa & 5 others [2023] KESC 30 (KLR)",
-    neutral_citation: "[2023] KESC 30",
-    court: "Supreme Court of Kenya",
-    year: 2023,
-    akn_url: "/akn/ke/judgment/kesc/2023/30",
-    url: "https://new.kenyalaw.org/akn/ke/judgment/kesc/2023/30",
-    source: "kenyalaw.org",
-    oscola_citation: "Dina Management Ltd v Mombasa County [2023] KESC 30 (KLR)",
-  },
-  {
-    case_title: "Mumo Matemu v Trusted Society of Human Rights Alliance & 5 others [2013] eKLR",
-    neutral_citation: "[2013] eKLR",
-    court: "Court of Appeal of Kenya",
-    year: 2013,
-    akn_url: "/akn/ke/judgment/keca/2013/1",
-    url: "https://new.kenyalaw.org/akn/ke/judgment/keca/2013/1",
-    source: "kenyalaw.org",
-    oscola_citation: "Mumo Matemu v Trusted Society [2013] eKLR",
-  },
-  {
-    case_title: "Francis Karioko Muruatetu & another v Republic [2017] eKLR",
-    neutral_citation: "[2017] eKLR",
-    court: "Supreme Court of Kenya",
-    year: 2017,
-    akn_url: "/akn/ke/judgment/kesc/2017/15",
-    url: "https://new.kenyalaw.org/akn/ke/judgment/kesc/2017/15",
-    source: "kenyalaw.org",
-    oscola_citation: "Muruatetu v Republic [2017] eKLR",
-  },
-];
-
 const BROWSER_HEADERS = {
   "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
   "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -359,23 +287,11 @@ export class KenyaLawClient {
         }
       }
 
-      // If results are still empty (403 Forbidden on edge), query built-in Kenya Law precedent index
-      if (results.length === 0) {
-        const qLower = query.toLowerCase();
-        const matches = BUILTIN_CASES_INDEX.filter((c) => qLower === "" || c.case_title.toLowerCase().includes(qLower) || c.oscola_citation.toLowerCase().includes(qLower));
-        if (matches.length > 0) {
-          results.push(...matches.slice(0, limit));
-        } else {
-          results.push(...BUILTIN_CASES_INDEX.slice(0, limit));
-        }
-      }
-
       queryCache.set(cacheKey, { timestamp: now, data: results });
       return results;
     } catch (err: any) {
       console.error("searchCaseLaw error:", err?.message || err);
-      // Failover to built-in precedent index
-      return BUILTIN_CASES_INDEX.slice(0, limit);
+      return [];
     }
   }
 
@@ -442,25 +358,11 @@ export class KenyaLawClient {
         }
       }
 
-      // If results are still empty (403 Forbidden on edge), query built-in Kenya Law statute index
-      if (results.length === 0) {
-        const qLower = actName.toLowerCase();
-        const matches = BUILTIN_STATUTES_INDEX.filter((s) => qLower === "" || s.short_title.toLowerCase().includes(qLower) || (s.act_number && s.act_number.toLowerCase().includes(qLower)));
-        if (matches.length > 0) {
-          results.push(...matches.slice(0, limit));
-        } else {
-          results.push(...BUILTIN_STATUTES_INDEX.slice(0, limit));
-        }
-      }
-
       queryCache.set(cacheKey, { timestamp: now, data: results });
       return results;
     } catch (err: any) {
       console.error("searchLegislation error:", err?.message || err);
-      // Failover to built-in statute index
-      const qLower = actName.toLowerCase();
-      const matches = BUILTIN_STATUTES_INDEX.filter((s) => qLower === "" || s.short_title.toLowerCase().includes(qLower));
-      return matches.length > 0 ? matches.slice(0, limit) : BUILTIN_STATUTES_INDEX.slice(0, limit);
+      return [];
     }
   }
 
