@@ -201,7 +201,7 @@ export async function handleStatelessMcpRequest(
       jsonrpc: "2.0",
       id: requestId,
       result: {
-        protocolVersion: "2026-07-28",
+        protocolVersion: payload?.params?.protocolVersion || "2024-11-05",
         capabilities: { tools: {} },
         serverInfo: {
           name: "kenya-law-mcp",
