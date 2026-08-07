@@ -51,19 +51,19 @@ describe("AKN MCP Tools", () => {
     const res = await getAknDocument({ akn_url: "/akn/ke/act/2010/4" });
     expect(res.content).toBeDefined();
     expect(res.content[0].type).toBe("text");
-  });
+  }, { timeout: 15000 });
 
   test("searchCaseLaw returns structured JSON response", async () => {
     const res = await searchCaseLaw({ query: "employment termination", limit: 2 });
     expect(res.content).toBeDefined();
     const data = JSON.parse(res.content[0].text);
     expect(data.query).toBe("employment termination");
-  });
+  }, { timeout: 15000 });
 
   test("searchLegislation returns structured JSON response", async () => {
     const res = await searchLegislation({ act_name: "Employment Act", limit: 2 });
     expect(res.content).toBeDefined();
     const data = JSON.parse(res.content[0].text);
     expect(data.act_name).toBe("Employment Act");
-  });
+  }, { timeout: 15000 });
 });

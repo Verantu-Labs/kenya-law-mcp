@@ -10,14 +10,14 @@ import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { ToolSchema } from "@modelcontextprotocol/core";
 import { z } from "zod";
 
-export type Tool = z.infer<typeof ToolSchema>;
-
-import { getAknDocument } from "./tools/get-akn-document.js";
+export type Tool = z.infer<typeof ToolSchema>;import { getAknDocument } from "./tools/get-akn-document.js";
 import { searchCaseLaw } from "./tools/search-case-law.js";
 import { searchLegislation } from "./tools/search-legislation.js";
 import { getCauseList } from "./tools/get-cause-list.js";
 import { checkCitator } from "./tools/check-citator.js";
 import { searchGazettes } from "./tools/search-gazettes.js";
+import { verifyCitation } from "./tools/verify-citation.js";
+import { getDocumentsBulk } from "./tools/get-documents-bulk.js";
 
 export const TOOLS: Tool[] = [
   {
@@ -33,6 +33,22 @@ export const TOOLS: Tool[] = [
         },
       },
       required: ["akn_url"],
+    },
+  },
+  {
+    name: "get_documents_bulk",
+    description:
+      "Fetches up to 10 Akoma Ntoso (AKN) legal documents in parallel in a single API call to save context tokens and round-trips.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        akn_urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "Array of up to 10 Akoma Ntoso URIs or URLs to fetch",
+        },
+      },
+      required: ["akn_urls"],
     },
   },
   {
@@ -116,6 +132,21 @@ export const TOOLS: Tool[] = [
     },
   },
   {
+    name: "verify_citation",
+    description:
+      "Verifies whether a legal citation string or neutral citation exists on Kenya Law, grounding LLM output and preventing hallucinations.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        citation_string: {
+          type: "string",
+          description: "The citation to verify (e.g. '[2022] KESC 8' or 'Employment Act')",
+        },
+      },
+      required: ["citation_string"],
+    },
+  },
+  {
     name: "search_gazettes",
     description:
       "Stateless real-time search across official Kenya Gazette notices (land title notices, government appointments, probate notices, tribunal decisions).",
@@ -159,6 +190,8 @@ export function createMcpServer() {
     switch (name) {
       case "get_akn_document":
         return getAknDocument(args as any);
+      case "get_documents_bulk":
+        return getDocumentsBulk(args as any);
       case "search_case_law":
         return searchCaseLaw(args as any);
       case "search_legislation":
@@ -167,6 +200,8 @@ export function createMcpServer() {
         return getCauseList(args as any);
       case "check_citator":
         return checkCitator(args as any);
+      case "verify_citation":
+        return verifyCitation(args as any);
       case "search_gazettes":
         return searchGazettes(args as any);
       default:
@@ -174,7 +209,7 @@ export function createMcpServer() {
           content: [
             {
               type: "text",
-              text: `Unknown tool '${name}'. Available tools are: get_akn_document, search_case_law, search_legislation, get_cause_list, check_citator, search_gazettes.`,
+              text: `Unknown tool '${name}'. Available tools are: ${TOOLS.map(t => t.name).join(", ")}.`,
             },
           ],
           isError: true,
@@ -228,6 +263,9 @@ export async function handleStatelessMcpRequest(
       case "get_akn_document":
         toolResult = await getAknDocument(toolArgs);
         break;
+      case "get_documents_bulk":
+        toolResult = await getDocumentsBulk(toolArgs);
+        break;
       case "search_case_law":
         toolResult = await searchCaseLaw(toolArgs);
         break;
@@ -239,6 +277,9 @@ export async function handleStatelessMcpRequest(
         break;
       case "check_citator":
         toolResult = await checkCitator(toolArgs);
+        break;
+      case "verify_citation":
+        toolResult = await verifyCitation(toolArgs);
         break;
       case "search_gazettes":
         toolResult = await searchGazettes(toolArgs);
