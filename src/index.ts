@@ -5,13 +5,12 @@
  * Transport: Stdio (spawned by local AI agents, Claude Desktop, Cursor, Windsurf, or Solon Desktop).
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  type Tool,
-} from "@modelcontextprotocol/sdk/types.js";
+import { Server } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { ToolSchema } from "@modelcontextprotocol/core";
+import { z } from "zod";
+
+export type Tool = z.infer<typeof ToolSchema>;
 
 import { getAknDocument } from "./tools/get-akn-document.js";
 import { searchCaseLaw } from "./tools/search-case-law.js";
@@ -150,11 +149,11 @@ export function createMcpServer() {
     }
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
+  server.setRequestHandler("tools/list", async () => {
     return { tools: TOOLS };
   });
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler("tools/call", async (request, _ctx) => {
     const { name, arguments: args = {} } = request.params;
 
     switch (name) {
@@ -202,7 +201,7 @@ export async function handleStatelessMcpRequest(
       jsonrpc: "2.0",
       id: requestId,
       result: {
-        protocolVersion: "2026-07-28",
+        protocolVersion: payload?.params?.protocolVersion || "2024-11-05",
         capabilities: { tools: {} },
         serverInfo: {
           name: "kenya-law-mcp",
@@ -273,7 +272,7 @@ async function main() {
 }
 
 // Only start stdio listener if executed directly via CLI
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("dist/index.js")) {
+if (typeof process !== "undefined" && (import.meta.url === `file://${process.argv?.[1]}` || process.argv?.[1]?.endsWith("dist/index.js"))) {
   main().catch((err) => {
     console.error("Fatal error starting kenya-law-mcp server:", err);
     process.exit(1);

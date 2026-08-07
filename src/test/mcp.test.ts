@@ -58,7 +58,7 @@ describe("2026-07-28 Stateless MCP Specification Handler", () => {
     const res = await handleStatelessMcpRequest({ id: 1, method: "initialize" });
     expect(res.jsonrpc).toBe("2.0");
     expect(res.id).toBe(1);
-    expect(res.result.protocolVersion).toBe("2026-07-28");
+    expect(res.result.protocolVersion).toBe("2024-11-05");
     expect(res.result.serverInfo.name).toBe("kenya-law-mcp");
   });
 
