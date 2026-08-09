@@ -77,7 +77,9 @@ const BROWSER_HEADERS = {
 
 export class KenyaLawClient {
   /**
-   * Fetches an Akoma Ntoso document by AKN URI or URL, appending /source for XML.
+   * Fetches an Akoma Ntoso document by AKN URI or URL.
+   * Standardizes relative paths to new.kenyalaw.org, follows 302 redirects,
+   * and gracefully extracts HTML/XML content without throwing invalid URL errors.
    */
   static async getAknDocument(aknUri: string): Promise<ParsedAknDocument> {
     const cacheKey = aknUri.trim().toLowerCase();
@@ -87,47 +89,43 @@ export class KenyaLawClient {
       return cached.data;
     }
 
-    // Standardize URL to AKN /source endpoint
-    let targetUrl = aknUri;
-    if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
-      targetUrl = `${NEW_BASE_URL}${aknUri.startsWith("/") ? "" : "/"}${aknUri}`;
-    }
-    if (!targetUrl.endsWith("/source") && !targetUrl.endsWith(".xml")) {
-      targetUrl = `${targetUrl.replace(/\/$/, "")}/eng/source`;
+    // 1. Convert relative AKN URIs to absolute HTTPS URLs
+    let fullUrl = aknUri.trim();
+    if (!fullUrl.startsWith("http://") && !fullUrl.startsWith("https://")) {
+      fullUrl = `${NEW_BASE_URL}${fullUrl.startsWith("/") ? "" : "/"}${fullUrl}`;
     }
 
     try {
-      const response = await fetch(targetUrl, {
+      // 2. First attempt: Fetch fullUrl directly (automatically follows 302 redirects to canonical expression date URLs)
+      let response = await fetch(fullUrl, {
         headers: BROWSER_HEADERS,
-        signal: AbortSignal.timeout(8000),
+        redirect: "follow",
+        signal: AbortSignal.timeout(15000),
       });
 
-      if (!response.ok) {
-        // Retry without /eng/source if raw URL was given
-        const fallbackRes = await fetch(aknUri, {
-          headers: {
-            "User-Agent": "VerantuLabs-KenyaLaw-MCP/1.0 (+https://verantulabs.com)",
-            Accept: "text/html, */*",
-          },
-          signal: AbortSignal.timeout(5000),
+      // 3. Fallback: If fullUrl fails and it's an AKN path without /eng/source, try appending /eng/source
+      if (!response.ok && fullUrl.includes("/akn/") && !fullUrl.endsWith("/source")) {
+        const sourceUrl = `${fullUrl.replace(/\/$/, "")}/eng/source`;
+        const sourceRes = await fetch(sourceUrl, {
+          headers: BROWSER_HEADERS,
+          redirect: "follow",
+          signal: AbortSignal.timeout(15000),
         });
-
-        if (!fallbackRes.ok) {
-          throw new Error(`HTTP ${response.status} when fetching AKN document ${aknUri}`);
+        if (sourceRes.ok) {
+          response = sourceRes;
         }
-
-        const html = await fallbackRes.text();
-        const parsed = parseAknXml(html, aknUri);
-        documentCache.set(cacheKey, { timestamp: now, data: parsed });
-        return parsed;
       }
 
-      const xmlText = await response.text();
-      const parsed = parseAknXml(xmlText, aknUri);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} when fetching AKN document ${fullUrl}`);
+      }
+
+      const text = await response.text();
+      const parsed = parseAknXml(text, aknUri);
       documentCache.set(cacheKey, { timestamp: now, data: parsed });
       return parsed;
     } catch (err: any) {
-      // Graceful fallback response on connection timeout
+      // Graceful fallback response on connection timeout or invalid response
       return {
         title: `Document ${aknUri}`,
         docType: "unknown",

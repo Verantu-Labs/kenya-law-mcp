@@ -1,4 +1,5 @@
 import { KenyaLawClient } from "../client/kenyaLawClient.js";
+import { searchLiveKenyaLaw } from "../web/kenyaLawWeb.js";
 
 type Args = {
   citation_string: string;
@@ -57,6 +58,27 @@ export async function verifyCitation(args: Args) {
             akn_url: cases[0].akn_url,
             url: cases[0].url,
             oscola_citation: cases[0].oscola_citation,
+          }, null, 2),
+        },
+      ],
+    };
+  }
+
+  // Live website search fallback
+  const liveResults = await searchLiveKenyaLaw(query, 3);
+  if (liveResults.length > 0) {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify({
+            verified: true,
+            type: "case_law",
+            citation_string: query,
+            matched_title: liveResults[0].case_title,
+            neutral_citation: liveResults[0].neutral_citation,
+            url: liveResults[0].url,
+            oscola_citation: liveResults[0].oscola_citation,
           }, null, 2),
         },
       ],

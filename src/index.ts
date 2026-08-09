@@ -2,7 +2,7 @@
  * kenya-law-mcp — High-Performance Stateless Akoma Ntoso (AKN) MCP Server.
  * Exposes deterministic Kenya statutes, case law, daily cause lists, and citators to AI agents.
  *
- * Transport: Stdio (spawned by local AI agents, Claude Desktop, Cursor, Windsurf, or Solon Desktop).
+ * Transport: Stdio (spawned by local AI agents, Claude Desktop, Cursor, Windsurf, or Solon Desktop..ETC).
  */
 
 import { Server } from "@modelcontextprotocol/server";
