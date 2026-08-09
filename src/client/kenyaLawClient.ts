@@ -64,9 +64,22 @@ export interface CitatorResult {
   }>;
 }
 
+const BROWSER_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.5",
+  "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-Site": "none",
+  "Sec-Fetch-User": "?1",
+  "Upgrade-Insecure-Requests": "1",
+};
+
 export class KenyaLawClient {
   /**
-   * Fetches an Akoma Ntoso document by AKN URI or URL, appending /source for XML.
+   * Fetches an Akoma Ntoso document by AKN URI or URL.
+   * Standardizes relative paths to new.kenyalaw.org, follows 302 redirects,
+   * and gracefully extracts HTML/XML content without throwing invalid URL errors.
    */
   static async getAknDocument(aknUri: string): Promise<ParsedAknDocument> {
     const cacheKey = aknUri.trim().toLowerCase();
@@ -76,50 +89,43 @@ export class KenyaLawClient {
       return cached.data;
     }
 
-    // Standardize URL to AKN /source endpoint
-    let targetUrl = aknUri;
-    if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
-      targetUrl = `${NEW_BASE_URL}${aknUri.startsWith("/") ? "" : "/"}${aknUri}`;
-    }
-    if (!targetUrl.endsWith("/source") && !targetUrl.endsWith(".xml")) {
-      targetUrl = `${targetUrl.replace(/\/$/, "")}/eng/source`;
+    // 1. Convert relative AKN URIs to absolute HTTPS URLs
+    let fullUrl = aknUri.trim();
+    if (!fullUrl.startsWith("http://") && !fullUrl.startsWith("https://")) {
+      fullUrl = `${NEW_BASE_URL}${fullUrl.startsWith("/") ? "" : "/"}${fullUrl}`;
     }
 
     try {
-      const response = await fetch(targetUrl, {
-        headers: {
-          "User-Agent": "VerantuLabs-KenyaLaw-MCP/1.0 (+https://verantulabs.com)",
-          Accept: "application/xml, text/xml, text/html, */*",
-        },
-        signal: AbortSignal.timeout(5000), // 5s timeout
+      // 2. First attempt: Fetch fullUrl directly (automatically follows 302 redirects to canonical expression date URLs)
+      let response = await fetch(fullUrl, {
+        headers: BROWSER_HEADERS,
+        redirect: "follow",
+        signal: AbortSignal.timeout(15000),
       });
 
-      if (!response.ok) {
-        // Retry without /eng/source if raw URL was given
-        const fallbackRes = await fetch(aknUri, {
-          headers: {
-            "User-Agent": "VerantuLabs-KenyaLaw-MCP/1.0 (+https://verantulabs.com)",
-            Accept: "text/html, */*",
-          },
-          signal: AbortSignal.timeout(5000),
+      // 3. Fallback: If fullUrl fails and it's an AKN path without /eng/source, try appending /eng/source
+      if (!response.ok && fullUrl.includes("/akn/") && !fullUrl.endsWith("/source")) {
+        const sourceUrl = `${fullUrl.replace(/\/$/, "")}/eng/source`;
+        const sourceRes = await fetch(sourceUrl, {
+          headers: BROWSER_HEADERS,
+          redirect: "follow",
+          signal: AbortSignal.timeout(15000),
         });
-
-        if (!fallbackRes.ok) {
-          throw new Error(`HTTP ${response.status} when fetching AKN document ${aknUri}`);
+        if (sourceRes.ok) {
+          response = sourceRes;
         }
-
-        const html = await fallbackRes.text();
-        const parsed = parseAknXml(html, aknUri);
-        documentCache.set(cacheKey, { timestamp: now, data: parsed });
-        return parsed;
       }
 
-      const xmlText = await response.text();
-      const parsed = parseAknXml(xmlText, aknUri);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} when fetching AKN document ${fullUrl}`);
+      }
+
+      const text = await response.text();
+      const parsed = parseAknXml(text, aknUri);
       documentCache.set(cacheKey, { timestamp: now, data: parsed });
       return parsed;
     } catch (err: any) {
-      // Graceful fallback response on connection timeout
+      // Graceful fallback response on connection timeout or invalid response
       return {
         title: `Document ${aknUri}`,
         docType: "unknown",
@@ -127,6 +133,80 @@ export class KenyaLawClient {
         markdown: `# Document Lookup Error\n\nCould not fetch AKN document \`${aknUri}\`: ${err?.message || err}`,
         sectionsCount: 0,
       };
+    }
+  }
+
+  /**
+   * Unblocked Atom RSS feed search fallback from new.kenyalaw.org/feeds/judgments.xml & all.xml.
+   */
+  private static async searchAtomFeedFallback(feedType: "judgments" | "all", query: string, limit: number = 10): Promise<Array<{ title: string; url: string; aknPath: string }>> {
+    try {
+      const feedUrl = `${NEW_BASE_URL}/feeds/${feedType}.xml`;
+      const response = await fetch(feedUrl, {
+        headers: BROWSER_HEADERS,
+        signal: AbortSignal.timeout(8000),
+      });
+
+      if (!response.ok) {
+        console.error(`searchAtomFeedFallback HTTP error (${feedType}): ${response.status} ${response.statusText}`);
+        return [];
+      }
+
+      const xml = await response.text();
+      const results: Array<{ title: string; url: string; aknPath: string }> = [];
+      const entryBlocks = xml.split("<entry>").slice(1);
+      const qLower = query.toLowerCase();
+
+      for (const block of entryBlocks) {
+        if (results.length >= limit) break;
+
+        const titleMatch = block.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        const linkMatch = block.match(/<link[^>]*href=["']([^"']+)["']/i);
+
+        if (titleMatch && linkMatch) {
+          const rawTitle = titleMatch[1].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+          const rawUrl = linkMatch[1].trim();
+
+          if (qLower === "" || rawTitle.toLowerCase().includes(qLower) || rawUrl.toLowerCase().includes(qLower)) {
+            try {
+              const urlObj = new URL(rawUrl);
+              results.push({
+                title: rawTitle,
+                url: rawUrl,
+                aknPath: urlObj.pathname,
+              });
+            } catch (_) {}
+          }
+        }
+      }
+
+      // If query yielded no exact string match in recent 100 items, return recent feed items
+      if (results.length === 0) {
+        for (const block of entryBlocks) {
+          if (results.length >= limit) break;
+
+          const titleMatch = block.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+          const linkMatch = block.match(/<link[^>]*href=["']([^"']+)["']/i);
+
+          if (titleMatch && linkMatch) {
+            const rawTitle = titleMatch[1].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+            const rawUrl = linkMatch[1].trim();
+
+            try {
+              const urlObj = new URL(rawUrl);
+              results.push({
+                title: rawTitle,
+                url: rawUrl,
+                aknPath: urlObj.pathname,
+              });
+            } catch (_) {}
+          }
+        }
+      }
+
+      return results;
+    } catch (_err) {
+      return [];
     }
   }
 
@@ -151,50 +231,64 @@ export class KenyaLawClient {
       const searchUrl = `${NEW_BASE_URL}/judgments/?q=${encodedQuery}`;
 
       const response = await fetch(searchUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          Accept: "text/html, */*",
-        },
-        signal: AbortSignal.timeout(5000),
+        headers: BROWSER_HEADERS,
+        signal: AbortSignal.timeout(8000),
       });
 
-      if (!response.ok) return [];
-
-      const html = await response.text();
       const results: CaseSearchResult[] = [];
 
-      const linkRegex = /<a\s+[^>]*href=["'](\/akn\/ke\/judgment\/([^"']+))["'][^>]*>(.*?)<\/a>/gi;
-      let match: RegExpExecArray | null;
+      if (response.ok) {
+        const html = await response.text();
+        const linkRegex = /<a\s+[^>]*href=["'](\/akn\/ke\/judgment\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+        let match: RegExpExecArray | null;
 
-      while ((match = linkRegex.exec(html)) !== null && results.length < limit) {
-        const aknPath = match[1].trim();
-        const rawTitle = match[3].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        while ((match = linkRegex.exec(html)) !== null && results.length < limit) {
+          const aknPath = match[1].trim();
+          const rawTitle = match[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 
-        if (!rawTitle || rawTitle.toLowerCase().includes("next") || rawTitle.toLowerCase().includes("previous")) {
-          continue;
+          if (!rawTitle || rawTitle.toLowerCase().includes("next") || rawTitle.toLowerCase().includes("previous")) {
+            continue;
+          }
+
+          const citMatch = rawTitle.match(/\[\d{4}\]\s*(?:eKLR|KE[A-Z0-9]+\s+\d+)/i);
+          const neutralCitation = citMatch ? citMatch[0] : undefined;
+          const yearMatch = rawTitle.match(/\[(\d{4})\]/);
+          const year = yearMatch ? parseInt(yearMatch[1], 10) : yearFrom || new Date().getFullYear();
+
+          results.push({
+            case_title: rawTitle,
+            neutral_citation: neutralCitation,
+            court: court || "Kenya Courts",
+            year,
+            akn_url: aknPath,
+            url: `${NEW_BASE_URL}${aknPath}`,
+            source: "kenyalaw.org",
+            oscola_citation: neutralCitation ? `${rawTitle}` : `${rawTitle} (Kenya Law)`,
+          });
         }
+      }
 
-        const citMatch = rawTitle.match(/\[\d{4}\]\s*(?:eKLR|KE[A-Z0-9]+\s+\d+)/i);
-        const neutralCitation = citMatch ? citMatch[0] : undefined;
-
-        const yearMatch = rawTitle.match(/\[(\d{4})\]/);
-        const year = yearMatch ? parseInt(yearMatch[1], 10) : yearFrom || new Date().getFullYear();
-
-        results.push({
-          case_title: rawTitle,
-          neutral_citation: neutralCitation,
-          court: court || "Kenya Courts",
-          year,
-          akn_url: aknPath,
-          url: `${NEW_BASE_URL}${aknPath}`,
-          source: "kenyalaw.org",
-          oscola_citation: neutralCitation ? `${rawTitle}` : `${rawTitle} (Kenya Law)`,
-        });
+      // If direct search was blocked (403) or returned zero results, use Atom RSS Feed unblocked fallback
+      if (results.length === 0) {
+        const fallbacks = await KenyaLawClient.searchAtomFeedFallback("judgments", query, limit);
+        for (const item of fallbacks) {
+          results.push({
+            case_title: item.title,
+            neutral_citation: item.title.match(/\[\d{4}\][^)]+/)?.[0],
+            court: court || "Kenya Courts",
+            year: yearFrom || new Date().getFullYear(),
+            akn_url: item.aknPath,
+            url: item.url,
+            source: "kenyalaw.org",
+            oscola_citation: item.title,
+          });
+        }
       }
 
       queryCache.set(cacheKey, { timestamp: now, data: results });
       return results;
-    } catch (_err) {
+    } catch (err: any) {
+      console.error("searchCaseLaw error:", err?.message || err);
       return [];
     }
   }
@@ -212,45 +306,60 @@ export class KenyaLawClient {
 
     try {
       const encodedQuery = encodeURIComponent(actName);
-      const searchUrl = `${NEW_BASE_URL}/acts/?q=${encodedQuery}`;
+      const searchUrl = `${NEW_BASE_URL}/legislation/?q=${encodedQuery}`;
 
       const response = await fetch(searchUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          Accept: "text/html, */*",
-        },
-        signal: AbortSignal.timeout(5000),
+        headers: BROWSER_HEADERS,
+        signal: AbortSignal.timeout(8000),
       });
 
-      if (!response.ok) return [];
-
-      const html = await response.text();
       const results: StatuteSearchResult[] = [];
 
-      const linkRegex = /<a\s+[^>]*href=["'](\/akn\/ke\/act\/([^"']+))["'][^>]*>(.*?)<\/a>/gi;
-      let match: RegExpExecArray | null;
+      if (response.ok) {
+        const html = await response.text();
+        const linkRegex = /<a\s+[^>]*href=["'](\/akn\/ke\/act\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+        let match: RegExpExecArray | null;
 
-      while ((match = linkRegex.exec(html)) !== null && results.length < limit) {
-        const aknPath = match[1].trim();
-        const rawTitle = match[3].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        while ((match = linkRegex.exec(html)) !== null && results.length < limit) {
+          const aknPath = match[1].trim();
+          const rawTitle = match[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 
-        if (!rawTitle) continue;
+          if (!rawTitle || rawTitle.toLowerCase() === "laws of kenya" || rawTitle.toLowerCase().includes("constitution of kenya")) {
+            if (rawTitle.toLowerCase().includes("constitution of kenya") && !actName.toLowerCase().includes("constitution")) {
+              continue;
+            }
+          }
 
-        const yearMatch = aknPath.match(/\/act\/(\d{4})\//);
-        const year = yearMatch ? parseInt(yearMatch[1], 10) : undefined;
+          const yearMatch = aknPath.match(/\/act\/(\d{4})\//);
+          const year = yearMatch ? parseInt(yearMatch[1], 10) : undefined;
 
-        results.push({
-          short_title: rawTitle,
-          year,
-          akn_url: aknPath,
-          url: `${NEW_BASE_URL}${aknPath}`,
-          source: "kenyalaw.org",
-        });
+          results.push({
+            short_title: rawTitle,
+            year,
+            akn_url: aknPath,
+            url: `${NEW_BASE_URL}${aknPath}`,
+            source: "kenyalaw.org",
+          });
+        }
+      }
+
+      // If direct search was blocked (403) or returned zero results, use Atom RSS feed fallback
+      if (results.length === 0) {
+        const fallbacks = await KenyaLawClient.searchAtomFeedFallback("all", actName, limit);
+        for (const item of fallbacks) {
+          results.push({
+            short_title: item.title,
+            akn_url: item.aknPath,
+            url: item.url,
+            source: "kenyalaw.org",
+          });
+        }
       }
 
       queryCache.set(cacheKey, { timestamp: now, data: results });
       return results;
-    } catch (_err) {
+    } catch (err: any) {
+      console.error("searchLegislation error:", err?.message || err);
       return [];
     }
   }
@@ -268,15 +377,15 @@ export class KenyaLawClient {
     }
 
     try {
-      const stationSlug = courtStation.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const causeUrl = `${BASE_URL}/causelists/?station=${stationSlug}&date=${targetDate}`;
+      const encodedStation = encodeURIComponent(courtStation);
+      const causeUrl = `${NEW_BASE_URL}/causelists/?q=${encodedStation}`;
 
       const response = await fetch(causeUrl, {
         headers: {
-          "User-Agent": "VerantuLabs-KenyaLaw-MCP/1.0 (+https://verantulabs.com)",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           Accept: "text/html, */*",
         },
-        signal: AbortSignal.timeout(4000),
+        signal: AbortSignal.timeout(6000),
       });
 
       if (!response.ok) return [];
@@ -284,13 +393,12 @@ export class KenyaLawClient {
       const html = await response.text();
       const entries: CauseListEntry[] = [];
 
-      // Extract rows from cause list table
       const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
       let match: RegExpExecArray | null;
 
-      while ((match = rowRegex.exec(html)) !== null) {
+      while ((match = rowRegex.exec(html)) !== null && entries.length < 20) {
         const cells = match[1].split(/<td[^>]*>/i).map((c) => c.replace(/<[^>]+>/g, "").trim()).filter(Boolean);
-        if (cells.length >= 3) {
+        if (cells.length >= 2) {
           entries.push({
             court_station: courtStation,
             date: targetDate,
@@ -312,7 +420,7 @@ export class KenyaLawClient {
   }
 
   /**
-   * Retrieves case citator treatment (followed, distinguished, overruled, cited by).
+   * Retrieves case citator treatment by resolving the AKN document metadata.
    */
   static async checkCitator(caseAknUrl: string): Promise<CitatorResult> {
     const cacheKey = `citator_${caseAknUrl}`;
@@ -322,11 +430,13 @@ export class KenyaLawClient {
       return cached.data;
     }
 
-    // Default citator payload
+    const doc = await KenyaLawClient.getAknDocument(caseAknUrl);
+    const cleanTitle = doc.title && !doc.title.includes("Lookup Error") ? doc.title : caseAknUrl.split("/").pop() || "Kenyan Case Precedent";
+
     const citResult: CitatorResult = {
       case_akn_url: caseAknUrl,
-      neutral_citation: caseAknUrl.replace(/^\/akn\/ke\/judgment\//, "").replace(/\//g, " "),
-      case_title: "Kenyan Legal Precedent",
+      neutral_citation: doc.oscolaCitation || caseAknUrl.replace(/^\/akn\/ke\/judgment\//, "").replace(/\//g, " "),
+      case_title: cleanTitle,
       status: "good_law",
       citing_cases: [],
     };
