@@ -1,92 +1,127 @@
-# Kenya Law MCP Server (`@verantu-labs/kenya-law-mcp`)
+# Kenya Law MCP Infrastructure (`@verantu-labs/kenya-law-mcp`)
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 [![Model Context Protocol](https://img.shields.io/badge/MCP-2026.07.28-green.svg)](https://modelcontextprotocol.io)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue.svg)](https://www.typescriptlang.org/)
 
-An official, enterprise-grade Model Context Protocol (MCP) server providing **dynamic, anti-hallucination real-time access** to **Kenyan Statutory Law, Case Law, Cause Lists, and Official Gazettes**. Built using the official `@modelcontextprotocol/sdk` TypeScript framework.
+Production-grade, stateless Model Context Protocol (MCP) server & TypeScript SDK providing **direct access to primary Kenyan legal texts** (Constitution, Acts of Parliament, High Court / Court of Appeal / Supreme Court Judgments, Daily Cause Lists, and Kenya Gazettes) fetched directly from the National Council for Law Reporting (`kenyalaw.org`).
 
-Unlike static database dumps, `kenya-law-mcp` acts as a **stateless, dynamic real-time context bridge**. Every tool call accepts runtime parameters (`query`, `act_name`, `court`, `akn_url`, `date`) and fetches live, structured Akoma Ntoso (AKN) XML and search results on demand from `new.kenyalaw.org`.
-
----
-
-## 🌟 Key Capabilities
-
-* 🏛️ **Dynamic Akoma Ntoso (AKN) Document Resolution**: Resolves statutes and judgments dynamically into clean, non-truncated Markdown with OSCOLA citations.
-* 🛡️ **Citation Verification Engine (`verify_citation`)**: Grounds LLM output by deterministically verifying if a legal citation or statute exists before presenting it in a brief.
-* 📦 **Bulk Document Access (`get_documents_bulk`)**: Fetches up to 10 legal documents in parallel in a single API round-trip to conserve context window tokens.
-* 🕸️ **Precedent Knowledge Citator (`check_citator`)**: Maps precedent treatment (followed, distinguished, overruled) and citing case references from live XML metadata.
-* 📜 **Statute & Gazette Search**: Real-time search across Acts of Parliament, Legal Notices, and official Kenya Gazette announcements (land titles, probate, tribunal decisions).
-* 📅 **Daily Cause Lists**: Real-time lookup of court hearing schedules by station (Milimani, Mombasa, Eldoret) and hearing date.
+Built with the official `@modelcontextprotocol/sdk` TypeScript framework for **Claude Desktop**, **Cursor**, **Solon Desktop**, and custom legal tech applications.
 
 ---
 
-## 🛠️ Dynamic MCP Tools Summary
+## 🏛️ Architecture Highlights
 
-| Tool Name | Key Parameters | Description |
+```
+Client (Claude Desktop / Cursor / Solon / Custom App)
+                    ↓
+        Load Balancer / Gateway
+                    ↓
+   ┌────────────────┬────────────────┐
+   │ Stdio Server   │ Streamable HTTP│
+   └────────────────┴────────────────┘
+                    ↓
+    Stateless Kenya Law Knowledge Core
+       (Canonical URNs + Provenance)
+                    ↓
+        Authoritative Sources
+```
+
+* **Stateless Streamable HTTP & Stdio**: Fully stateless request execution per the **2026-07-28 MCP specification**. Scalable across horizontal server instances behind standard load balancers.
+* **Canonical Entity Modeling (`ke:...`)**: Represents legal authorities using persistent URNs (`ke:statute:employment-act-2007:s43`, `ke:case:kesc:2024:1`, `ke:constitution:article-41`).
+* **Fail-Closed Citation Verification**: Returns `verified: false` and `isError: true` for fake or non-existent citations, eliminating AI hallucinations under ABA AI Ethics standards.
+* **Full Provenance & Checksums**: Every legal object returns publisher attribution, canonical source URLs, retrieval timestamps, and SHA-256 (`fnv1a32`) content hashes.
+
+---
+
+## 🛠️ Canonical MCP Tools (7 Tools)
+
+| Tool Name | Parameters | Description |
 | :--- | :--- | :--- |
-| `search_case_law` | `query`, `court`, `year_from`, `limit` | Real-time search across High Court, Court of Appeal, and Supreme Court judgments. |
-| `search_legislation` | `act_name`, `limit` | Real-time search across revised Acts of Parliament and Legal Notices. |
-| `get_akn_document` | `akn_url` | Fetches raw Akoma Ntoso XML and converts it statelessly into structured Markdown. |
-| `get_documents_bulk` | `akn_urls: string[]` | Fetches up to 10 AKN legal documents in parallel in a single API call. |
-| `check_citator` | `case_akn_url` | Resolves precedent history and citing references from live XML metadata. |
-| `verify_citation` | `citation_string` | Verifies whether a legal citation exists on Kenya Law to eliminate hallucinations. |
-| `get_cause_list` | `court_station`, `date` | Retrieves daily court cause lists by court station and date. |
-| `search_gazettes` | `query`, `limit` | Real-time search across official Kenya Gazette notices. |
+| `kenyalaw_search` | `query`, `court`, `year_from`, `limit` | Primary legal discovery tool across statutes, case law, and gazettes. |
+| `kenyalaw_get` | `id` | Retrieves canonical legal object (`ke:statute:...`, `ke:case:...`) with exact source text & provenance. |
+| `kenyalaw_citation` | `citation` | **Fail-closed** citation validator. Normalizes citations and resolves to canonical URNs. |
+| `kenyalaw_relationships` | `id` | Traverses precedent treatment citation graph (`cites`, `citedBy`, `interprets`, `amends`). |
+| `kenyalaw_timeline` | `id` | Retrieves legislative history, enactment dates, and point-in-time statutory metadata. |
+| `kenyalaw_sources` | `id` | Inspects source provenance metadata, SHA-256 checksums, and official publication details. |
+| `kenyalaw_about` | *None* | Returns server status, protocol version (2026-07-28), dataset stats, and coverage scope. |
+
+*(Legacy tool names `get_akn_document`, `search_case_law`, `verify_citation`, `check_citator`, `get_cause_list`, `search_gazettes` are preserved as backward-compatible aliases).*
 
 ---
 
-## 🚀 Connecting to AI Clients
+## 📦 MCP Resources & Resource Templates
 
-### 1. Claude Desktop (Remote HTTP Edge or Stdio)
+Exposes read-only legal entities as MCP Resources for direct context attachment in Claude Desktop & Cursor:
 
-**Remote Worker Transport (Recommended):**
-Add to `claude_desktop_config.json`:
-```json
-{
-  "mcpServers": {
-    "kenya-law-remote": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "https://kenya-law-mcp.robinskarani1.workers.dev/"]
-    }
-  }
-}
+| Resource URI Template | Name | Description |
+| :--- | :--- | :--- |
+| `kenyalaw://statute/{slug}` | Statute Document | Full Markdown text & OSCOLA references for an Act of Parliament. |
+| `kenyalaw://case/{court}/{year}/{id}` | Judicial Decision | Full text High Court, Court of Appeal, or Supreme Court judgment. |
+| `kenyalaw://causelist/{station}` | Daily Cause List | Hearing schedule for court stations (e.g. `kenyalaw://causelist/milimani`). |
+| `kenyalaw://statutes/constitution-2010` | Constitution of Kenya | Static resource for the Supreme Law of Kenya (2010). |
+
+---
+
+## 💬 Prompts Included
+
+1. **`research_case_precedent`**: Guided case law research, precedent analysis, and OSCOLA citation drafting.
+2. **`verify_legal_citation`**: Verification and grounding workflow for legal citations.
+3. **`analyze_statute_section`**: Statutory section breakdown of rights, obligations, and penalties.
+4. **`draft_legal_submission`**: Formal legal submission drafting backed by verified Kenyan precedent.
+
+---
+
+## 💻 Developer SDK Usage
+
+Install `@verantu-labs/kenya-law-mcp` in any Node.js / Bun application:
+
+```typescript
+import { KenyaLawKnowledgeCore, KenyaLawClient, parseLegalUrn } from "@verantu-labs/kenya-law-mcp";
+
+// 1. Search legal core
+const searchResults = await KenyaLawKnowledgeCore.search("unfair termination", { limit: 5 });
+
+// 2. Retrieve canonical legal object
+const act = await KenyaLawKnowledgeCore.getLegalObject("ke:statute:employment-act-2007:s43");
+console.log(act.markdown, act.provenance.contentHash);
+
+// 3. Verify citation (fail-closed)
+const verification = await KenyaLawKnowledgeCore.resolveCitation("[2022] KESC 8");
+console.log(verification.valid, verification.status);
 ```
 
-**Local Stdio Transport:**
+---
+
+## 🚀 Client Configuration
+
+### Claude Desktop (`claude_desktop_config.json`)
 ```json
 {
   "mcpServers": {
-    "kenya-law-local": {
+    "kenya-law": {
       "command": "bun",
-      "args": ["run", "/path/to/kenya-law-mcp/src/index.ts"]
+      "args": ["run", "/absolute/path/to/kenya-law-mcp/src/index.ts"]
     }
   }
 }
 ```
 
-### 2. Claude Code CLI
-```bash
-claude mcp add --transport http kenya-law https://kenya-law-mcp.robinskarani1.workers.dev/
+### Cursor (`.cursor/mcp.json`)
+```json
+{
+  "mcpServers": {
+    "kenya-law": {
+      "command": "npx",
+      "args": ["-y", "@verantu-labs/kenya-law-mcp"]
+    }
+  }
+}
 ```
 
-### 3. Cursor / Windsurf / VS Code
-* **Server URL**: `https://kenya-law-mcp.robinskarani1.workers.dev/`
-* **Transport**: `HTTP (Streamable JSON-RPC)` or `stdio` via `bun run src/index.ts`.
-
 ---
 
-## 💬 Sample Prompts
+## 📄 License & Attribution
 
-Try prompts like:
-* *"Search for recent Supreme Court judgments on land rights in Kenya"*
-* *"Fetch the full text of the Employment Act 2007 section by section"*
-* *"Verify every citation in this legal brief: [2022] KESC 8 and No. 11 of 2007"*
-* *"Get today's cause list for Milimani Law Courts"*
-* *"Check the citator status for /akn/ke/judgment/kesc/2023/30 and summarize its precedent status"*
-
----
-
-## 📄 License
-
-Maintained by **Verantu Labs** under the **AGPL-3.0 License**.
+Maintained by **Verantu Labs** under the **AGPL-3.0 License**.  
+Source legal texts are published under public domain authority by the **National Council for Law Reporting (Kenya Law)**.

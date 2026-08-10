@@ -56,7 +56,8 @@ export interface CitatorResult {
   case_akn_url: string;
   neutral_citation: string;
   case_title: string;
-  status: "good_law" | "overruled" | "distinguished" | "doubted";
+  verified: boolean;
+  status: "good_law" | "overruled" | "distinguished" | "doubted" | "not_found";
   citing_cases: Array<{
     citation: string;
     treatment: "followed" | "distinguished" | "overruled" | "referred_to";
@@ -74,6 +75,30 @@ const BROWSER_HEADERS = {
   "Sec-Fetch-User": "?1",
   "Upgrade-Insecure-Requests": "1",
 };
+
+const COURT_SLUGS: Record<string, { slug: string; code: string; name: string }> = {
+  supreme: { slug: "supreme-court", code: "kesc", name: "Supreme Court of Kenya" },
+  kesc: { slug: "supreme-court", code: "kesc", name: "Supreme Court of Kenya" },
+  appeal: { slug: "court-of-appeal", code: "keca", name: "Court of Appeal of Kenya" },
+  keca: { slug: "court-of-appeal", code: "keca", name: "Court of Appeal of Kenya" },
+  high: { slug: "high-court", code: "kehc", name: "High Court of Kenya" },
+  kehc: { slug: "high-court", code: "kehc", name: "High Court of Kenya" },
+  land: { slug: "environment-and-land-court", code: "keelc", name: "Environment and Land Court" },
+  elc: { slug: "environment-and-land-court", code: "keelc", name: "Environment and Land Court" },
+  keelc: { slug: "environment-and-land-court", code: "keelc", name: "Environment and Land Court" },
+  labour: { slug: "employment-and-labour-relations-court", code: "keelrc", name: "Employment & Labour Relations Court" },
+  elrc: { slug: "employment-and-labour-relations-court", code: "keelrc", name: "Employment & Labour Relations Court" },
+  keelrc: { slug: "employment-and-labour-relations-court", code: "keelrc", name: "Employment & Labour Relations Court" },
+};
+
+function resolveCourt(courtStr?: string) {
+  if (!courtStr) return null;
+  const lower = courtStr.toLowerCase().trim();
+  for (const [key, value] of Object.entries(COURT_SLUGS)) {
+    if (lower.includes(key)) return value;
+  }
+  return null;
+}
 
 export class KenyaLawClient {
   /**
@@ -211,7 +236,10 @@ export class KenyaLawClient {
   }
 
   /**
-   * Performs real-time search across Kenya Law cases.
+   * Performs real-time search across Kenya Law cases using progressive fallback:
+   * 1. Specialized court endpoint (if court filter was requested)
+   * 2. General judgments search (if specialized search returns 0 results or no court specified)
+   * 3. Atom RSS & Live search fallback (if direct search returns 0 results or times out)
    */
   static async searchCaseLaw(
     query: string,
@@ -228,26 +256,37 @@ export class KenyaLawClient {
 
     try {
       const encodedQuery = encodeURIComponent(query);
-      const searchUrl = `${NEW_BASE_URL}/judgments/?q=${encodedQuery}`;
-
-      const response = await fetch(searchUrl, {
-        headers: BROWSER_HEADERS,
-        signal: AbortSignal.timeout(8000),
-      });
-
+      const courtInfo = resolveCourt(court);
       const results: CaseSearchResult[] = [];
 
-      if (response.ok) {
-        const html = await response.text();
-        const linkRegex = /<a\s+[^>]*href=["'](\/akn\/ke\/judgment\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+      const qWords = query.toLowerCase().trim().split(/\s+/).filter(w => w.length > 2);
+
+      // Helper function to extract search results from HTML
+      const parseHtmlResults = (html: string, enforceCourtCode?: string, requireKeywordMatch: boolean = true) => {
+        const linkRegex = /<a\s+[^>]*href=["']((?:\/akn\/ke\/judgment\/|\/akn\/ke\/act\/|https?:\/\/kenyalaw\.org\/caselaw\/cases\/view\/)[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
         let match: RegExpExecArray | null;
 
         while ((match = linkRegex.exec(html)) !== null && results.length < limit) {
-          const aknPath = match[1].trim();
+          const rawLink = match[1].trim();
+          const aknPath = rawLink.startsWith("http") ? new URL(rawLink).pathname : rawLink;
           const rawTitle = match[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 
-          if (!rawTitle || rawTitle.toLowerCase().includes("next") || rawTitle.toLowerCase().includes("previous")) {
+          if (!rawTitle || rawTitle.toLowerCase().includes("next") || rawTitle.toLowerCase().includes("previous") || rawTitle.toLowerCase() === "search" || rawTitle.toLowerCase() === "home") {
             continue;
+          }
+
+          if (enforceCourtCode && !aknPath.includes(`/${enforceCourtCode}/`)) {
+            continue;
+          }
+
+          // Ensure extracted link is relevant to the search query
+          if (requireKeywordMatch && qWords.length > 0) {
+            const titleLower = rawTitle.toLowerCase();
+            const aknLower = aknPath.toLowerCase();
+            const isMatch = qWords.some(w => titleLower.includes(w) || aknLower.includes(w));
+            if (!isMatch) {
+              continue;
+            }
           }
 
           const citMatch = rawTitle.match(/\[\d{4}\]\s*(?:eKLR|KE[A-Z0-9]+\s+\d+)/i);
@@ -255,34 +294,122 @@ export class KenyaLawClient {
           const yearMatch = rawTitle.match(/\[(\d{4})\]/);
           const year = yearMatch ? parseInt(yearMatch[1], 10) : yearFrom || new Date().getFullYear();
 
+          // Infer court name from AKN path if available
+          let inferredCourt = courtInfo ? courtInfo.name : (court || "Kenya Courts");
+          if (aknPath.includes("/kesc/")) inferredCourt = "Supreme Court of Kenya";
+          else if (aknPath.includes("/keca/")) inferredCourt = "Court of Appeal of Kenya";
+          else if (aknPath.includes("/kehc/")) inferredCourt = "High Court of Kenya";
+          else if (aknPath.includes("/keelc/")) inferredCourt = "Environment and Land Court";
+          else if (aknPath.includes("/keelrc/")) inferredCourt = "Employment & Labour Relations Court";
+
           results.push({
             case_title: rawTitle,
             neutral_citation: neutralCitation,
-            court: court || "Kenya Courts",
+            court: inferredCourt,
             year,
             akn_url: aknPath,
-            url: `${NEW_BASE_URL}${aknPath}`,
+            url: aknPath.startsWith("http") ? aknPath : `${NEW_BASE_URL}${aknPath}`,
             source: "kenyalaw.org",
             oscola_citation: neutralCitation ? `${rawTitle}` : `${rawTitle} (Kenya Law)`,
           });
         }
+      };
+
+      // Tier 1: Try unified search endpoint /search/?q=... first
+      let unifiedUrl = `${NEW_BASE_URL}/search/?q=${encodedQuery}`;
+      if (court) unifiedUrl += `&court=${encodeURIComponent(court)}`;
+      if (yearFrom) unifiedUrl += `&year=${yearFrom}`;
+
+      let res = await fetch(unifiedUrl, {
+        headers: BROWSER_HEADERS,
+        redirect: "follow",
+        signal: AbortSignal.timeout(8000),
+      }).catch(() => null);
+
+      if (res && res.ok) {
+        const html = await res.text();
+        parseHtmlResults(html, courtInfo ? courtInfo.code : undefined, true);
       }
 
-      // If direct search was blocked (403) or returned zero results, use Atom RSS Feed unblocked fallback
+      // Tier 2: Try /judgments/?q=...
+      if (results.length === 0) {
+        let genUrl = `${NEW_BASE_URL}/judgments/?q=${encodedQuery}`;
+        if (court) genUrl += `&court=${encodeURIComponent(court)}`;
+        if (yearFrom) genUrl += `&year=${yearFrom}`;
+
+        res = await fetch(genUrl, {
+          headers: BROWSER_HEADERS,
+          redirect: "follow",
+          signal: AbortSignal.timeout(8000),
+        }).catch(() => null);
+
+        if (res && res.ok) {
+          const html = await res.text();
+          parseHtmlResults(html, courtInfo ? courtInfo.code : undefined, true);
+        }
+      }
+
+      // Tier 3: Atom Feed & Live Search Fallback if direct search returned 0 results
       if (results.length === 0) {
         const fallbacks = await KenyaLawClient.searchAtomFeedFallback("judgments", query, limit);
+        const qWords = query.toLowerCase().trim().split(/\s+/).filter(w => w.length > 2);
+
         for (const item of fallbacks) {
-          results.push({
-            case_title: item.title,
-            neutral_citation: item.title.match(/\[\d{4}\][^)]+/)?.[0],
-            court: court || "Kenya Courts",
-            year: yearFrom || new Date().getFullYear(),
-            akn_url: item.aknPath,
-            url: item.url,
-            source: "kenyalaw.org",
-            oscola_citation: item.title,
-          });
+          const itemLower = (item.title + " " + item.aknPath).toLowerCase();
+          const matchesKeyword = qWords.some(w => itemLower.includes(w));
+
+          if (matchesKeyword || qWords.length === 0) {
+            let inferredCourt = courtInfo ? courtInfo.name : (court || "Kenya Courts");
+            if (item.aknPath.includes("/kesc/")) inferredCourt = "Supreme Court of Kenya";
+            else if (item.aknPath.includes("/keca/")) inferredCourt = "Court of Appeal of Kenya";
+            else if (item.aknPath.includes("/kehc/")) inferredCourt = "High Court of Kenya";
+            else if (item.aknPath.includes("/keelc/")) inferredCourt = "Environment and Land Court";
+            else if (item.aknPath.includes("/keelrc/")) inferredCourt = "Employment & Labour Relations Court";
+
+            results.push({
+              case_title: item.title,
+              neutral_citation: item.title.match(/\[\d{4}\][^)]+/)?.[0],
+              court: inferredCourt,
+              year: yearFrom || new Date().getFullYear(),
+              akn_url: item.aknPath,
+              url: item.url,
+              source: "kenyalaw.org",
+              oscola_citation: item.title,
+            });
+          }
         }
+
+        // If no keyword match was found in feed items, return recent feed items so the LLM gets live AKN URIs
+        if (results.length === 0 && fallbacks.length > 0) {
+          for (const item of fallbacks.slice(0, limit)) {
+            let inferredCourt = courtInfo ? courtInfo.name : (court || "Kenya Courts");
+            if (item.aknPath.includes("/kesc/")) inferredCourt = "Supreme Court of Kenya";
+            else if (item.aknPath.includes("/keca/")) inferredCourt = "Court of Appeal of Kenya";
+            else if (item.aknPath.includes("/kehc/")) inferredCourt = "High Court of Kenya";
+
+            results.push({
+              case_title: item.title,
+              neutral_citation: item.title.match(/\[\d{4}\][^)]+/)?.[0],
+              court: inferredCourt,
+              year: yearFrom || new Date().getFullYear(),
+              akn_url: item.aknPath,
+              url: item.url,
+              source: "kenyalaw.org",
+              oscola_citation: item.title,
+            });
+          }
+        }
+      }
+
+      const qLower = query.toLowerCase().trim();
+      if (qLower.length > 0) {
+        results.sort((a, b) => {
+          const aMatch = a.case_title.toLowerCase().includes(qLower) || a.akn_url.toLowerCase().includes(qLower);
+          const bMatch = b.case_title.toLowerCase().includes(qLower) || b.akn_url.toLowerCase().includes(qLower);
+          if (aMatch && !bMatch) return -1;
+          if (!aMatch && bMatch) return 1;
+          return 0;
+        });
       }
 
       queryCache.set(cacheKey, { timestamp: now, data: results });
@@ -346,13 +473,16 @@ export class KenyaLawClient {
       // If direct search was blocked (403) or returned zero results, use Atom RSS feed fallback
       if (results.length === 0) {
         const fallbacks = await KenyaLawClient.searchAtomFeedFallback("all", actName, limit);
+        const actLower = actName.toLowerCase().trim();
         for (const item of fallbacks) {
-          results.push({
-            short_title: item.title,
-            akn_url: item.aknPath,
-            url: item.url,
-            source: "kenyalaw.org",
-          });
+          if (item.title.toLowerCase().includes(actLower) || item.aknPath.toLowerCase().includes(actLower)) {
+            results.push({
+              short_title: item.title,
+              akn_url: item.aknPath,
+              url: item.url,
+              source: "kenyalaw.org",
+            });
+          }
         }
       }
 
@@ -431,12 +561,32 @@ export class KenyaLawClient {
     }
 
     const doc = await KenyaLawClient.getAknDocument(caseAknUrl);
-    const cleanTitle = doc.title && !doc.title.includes("Lookup Error") ? doc.title : caseAknUrl.split("/").pop() || "Kenyan Case Precedent";
+    const titleLower = (doc.title || "").toLowerCase();
+    const isErrorOrNotFound =
+      !doc.title ||
+      titleLower.includes("lookup error") ||
+      titleLower.includes("not found") ||
+      titleLower.includes("404") ||
+      doc.markdown.includes("Lookup Error");
+
+    if (isErrorOrNotFound) {
+      const failedResult: CitatorResult = {
+        case_akn_url: caseAknUrl,
+        neutral_citation: caseAknUrl,
+        case_title: "Unverified / Non-Existent Citation",
+        verified: false,
+        status: "not_found",
+        citing_cases: [],
+      };
+      queryCache.set(cacheKey, { timestamp: now, data: failedResult });
+      return failedResult;
+    }
 
     const citResult: CitatorResult = {
       case_akn_url: caseAknUrl,
       neutral_citation: doc.oscolaCitation || caseAknUrl.replace(/^\/akn\/ke\/judgment\//, "").replace(/\//g, " "),
-      case_title: cleanTitle,
+      case_title: doc.title,
+      verified: true,
       status: "good_law",
       citing_cases: [],
     };
