@@ -5,6 +5,8 @@
   "description": "MCP server providing deterministic, citation-complete access to Kenya statutes and case law",
   "type": "module",
   "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "bin": {
     "kenya-law-mcp": "./dist/index.js"
   },

@@ -6,6 +6,8 @@
     "strict": true,
     "skipLibCheck": true,
     "outDir": "./dist",
+    "declaration": true,
+    "declarationMap": true,
     "types": ["bun-types"]
   },
   "include": ["src/**/*.ts"],
