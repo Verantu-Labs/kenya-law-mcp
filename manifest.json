@@ -1,0 +1,21 @@
+{
+  "manifest_version": "0.2",
+  "name": "@verantu-labs/kenya-law-mcp",
+  "version": "0.1.0",
+  "description": "MCP server providing deterministic, citation-complete access to Kenya statutes and case law",
+  "author": {
+    "name": "Verantu Labs"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "./dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/./dist/index.js"
+      ],
+      "env": {}
+    }
+  },
+  "license": "MIT"
+}
