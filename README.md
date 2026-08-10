@@ -30,11 +30,12 @@ cd kenya-law-mcp
 bun install
 ```
 
-3. Add to your Claude Desktop config file:
-- Linux: `~/.config/Claude/claude_desktop_config.json`
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+3. Add via Claude CLI (1-line command):
+```bash
+claude mcp add kenya-law -- bun run /absolute/path/to/kenya-law-mcp/src/index.ts
+```
 
+Or add to your Claude Desktop JSON config file (`~/.config/Claude/claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
@@ -49,16 +50,17 @@ bun install
 }
 ```
 
-4. Restart Claude Desktop.
-
 ---
 
 ### Method 2: Cloudflare Remote Worker
 
-To connect directly to the hosted Cloudflare Worker without local setup:
+To connect directly to the hosted Cloudflare Worker via Claude CLI:
 
-1. Open Claude Desktop, go to Settings -> Developer -> Edit Config.
-2. Add:
+```bash
+claude mcp add --transport http kenya-law https://kenya-law-mcp.robinskarani1.workers.dev/
+```
+
+Or add to your JSON config file manually:
 ```json
 {
   "mcpServers": {
@@ -74,11 +76,12 @@ To connect directly to the hosted Cloudflare Worker without local setup:
 }
 ```
 
-Note: Datacenter IP ranges used by cloud workers may return 403 on live search queries from third-party sites. Use Method 1 for full search access.
+#### Note on Network Behavior
+Remote cloud worker instances operate from datacenter IP blocks (AS13335). If external legal portals restrict datacenter IP ranges for live queries, use Method 1 (Local Stdio) for complete query coverage.
 
 ---
 
-### Method 3: One-Click Extension Bundle (.mcpb)
+### Method 3: One-Click Extension Bundle (`.mcpb`)
 
 Validate and pack into a single-file desktop extension bundle:
 
