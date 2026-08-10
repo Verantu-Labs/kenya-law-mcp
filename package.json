@@ -6,7 +6,10 @@
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "kenya-law-mcp": "./dist/bin.js"
+    "kenya-law-mcp": "./dist/index.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "exports": {
     ".": "./dist/index.js"
