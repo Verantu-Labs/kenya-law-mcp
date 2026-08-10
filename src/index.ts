@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * kenya-law-mcp — High-Performance Stateless Akoma Ntoso (AKN) MCP Server.
  * Exposes Kenya statutes, case law, daily cause lists, and citators directly to AI agents.
