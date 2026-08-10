@@ -19,6 +19,8 @@ export async function checkCitator(args: Args) {
 
   const citatorData = await KenyaLawClient.checkCitator(args.case_akn_url);
 
+  const isError = !citatorData.verified || citatorData.status === "not_found";
+
   return {
     content: [
       {
@@ -26,5 +28,6 @@ export async function checkCitator(args: Args) {
         text: JSON.stringify(citatorData, null, 2),
       },
     ],
+    ...(isError ? { isError: true } : {}),
   };
 }

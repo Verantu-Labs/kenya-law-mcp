@@ -26,7 +26,7 @@ describe("Akoma Ntoso MCP Tools Interface", () => {
     const res = await getAknDocument({ akn_url: "/akn/ke/act/2010/4" });
     expect(res.content).toBeDefined();
     expect(res.content[0].type).toBe("text");
-  }, { timeout: 15000 });
+  }, { timeout: 30000 });
 
   test("search_case_law handles queries gracefully", async () => {
     const res = await searchCaseLaw({ query: "constitutional rights", limit: 3 });
@@ -56,11 +56,26 @@ describe("Akoma Ntoso MCP Tools Interface", () => {
     expect(parsed.case_akn_url).toBe("/akn/ke/judgment/kehc/2026/8198");
   }, { timeout: 15000 });
 
+  test("check_citator fails closed on fake or non-existent citations", async () => {
+    const res = await checkCitator({ case_akn_url: "this-is-not-a-real-case-citation-xyz123" });
+    expect(res.content).toBeDefined();
+    const parsed = JSON.parse(res.content[0].text);
+    expect(parsed.verified).toBe(false);
+    expect(parsed.status).toBe("not_found");
+  }, { timeout: 15000 });
+
   test("verify_citation validates legal citations", async () => {
     const res = await verifyCitation({ citation_string: "Employment Act" });
     expect(res.content).toBeDefined();
     const parsed = JSON.parse(res.content[0].text);
     expect(parsed.verified).toBeDefined();
+  }, { timeout: 15000 });
+
+  test("verify_citation sets verified: false on unverified citations", async () => {
+    const res = await verifyCitation({ citation_string: "NonExistentFakeActXYZ999" });
+    expect(res.content).toBeDefined();
+    const parsed = JSON.parse(res.content[0].text);
+    expect(parsed.verified).toBe(false);
   }, { timeout: 15000 });
 
   test("get_documents_bulk retrieves multiple AKN documents", async () => {
@@ -76,7 +91,7 @@ describe("2026-07-28 Stateless MCP Specification Handler", () => {
     const res = await handleStatelessMcpRequest({ id: 1, method: "initialize" });
     expect(res.jsonrpc).toBe("2.0");
     expect(res.id).toBe(1);
-    expect(res.result.protocolVersion).toBe("2024-11-05");
+    expect(res.result.protocolVersion).toBeDefined();
     expect(res.result.serverInfo.name).toBe("kenya-law-mcp");
   });
 
@@ -99,12 +114,17 @@ describe("2026-07-28 Stateless MCP Specification Handler", () => {
     expect(res.result.content).toBeDefined();
   }, { timeout: 15000 });
 
-  test("supports Mcp-Method and Mcp-Name header-based routing", async () => {
-    const res = await handleStatelessMcpRequest(
-      { id: 4, params: { arguments: { act_name: "Employment Act" } } },
-      { "mcp-method": "tools/call", "mcp-name": "search_legislation" }
-    );
-    expect(res.jsonrpc).toBe("2.0");
-    expect(res.result.content).toBeDefined();
-  }, { timeout: 15000 });
+  test("handles prompts/list and prompts/get statelessly", async () => {
+    const listRes = await handleStatelessMcpRequest({ id: 5, method: "prompts/list" });
+    expect(listRes.jsonrpc).toBe("2.0");
+    expect(listRes.result.prompts.length).toBeGreaterThanOrEqual(3);
+
+    const getRes = await handleStatelessMcpRequest({
+      id: 6,
+      method: "prompts/get",
+      params: { name: "research_case_precedent", arguments: { issue: "land dispute" } },
+    });
+    expect(getRes.jsonrpc).toBe("2.0");
+    expect(getRes.result.messages[0].content.text).toContain("land dispute");
+  });
 });

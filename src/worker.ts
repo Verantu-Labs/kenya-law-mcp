@@ -37,7 +37,7 @@ export default {
       );
     }
 
-    // 2026 Stateless MCP POST Handler (Single endpoint / or /mcp)
+    // 2026-07-28 Stateless MCP POST Handler (Single endpoint / or /mcp)
     if (request.method === "POST") {
       try {
         const payload = await request.json().catch(() => ({}));
@@ -53,6 +53,7 @@ export default {
           status: 200,
           headers: {
             "Content-Type": "application/json",
+            "X-MCP-Protocol-Version": "2026-07-28",
             ...CORS_HEADERS,
           },
         });

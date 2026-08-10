@@ -10,3 +10,9 @@ ENVIRONMENT = "production"
 # [[kv_namespaces]]
 # binding = "KENYA_LAW_CACHE"
 # id = "your-kv-namespace-id"
+
+[observability.traces]
+enabled = true
+[observability.logs]
+enabled = true
+invocation_logs = true
