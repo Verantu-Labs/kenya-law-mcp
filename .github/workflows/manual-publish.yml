@@ -1,0 +1,67 @@
+name: Manual Package & Image Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_npm:
+        description: 'Publish package to GitHub Packages / NPM'
+        type: boolean
+        default: false
+      publish_docker:
+        description: 'Build & push Docker image to GHCR'
+        type: boolean
+        default: false
+      deploy_cloudflare:
+        description: 'Deploy to Cloudflare Workers'
+        type: boolean
+        default: false
+
+jobs:
+  manual-publish:
+    name: Manual Release Actions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build Output
+        run: bun run build
+
+      - name: Publish to GitHub Packages (NPM Registry)
+        if: ${{ inputs.publish_npm }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm config set //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+          npm publish --registry=https://npm.pkg.github.com || true
+
+      - name: Log in to GitHub Container Registry
+        if: ${{ inputs.publish_docker }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        if: ${{ inputs.publish_docker }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+      - name: Deploy to Cloudflare Workers
+        if: ${{ inputs.deploy_cloudflare }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

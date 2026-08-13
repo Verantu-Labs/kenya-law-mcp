@@ -2,11 +2,16 @@
   "name": "@verantu-labs/kenya-law-mcp",
   "version": "0.1.0",
   "private": true,
-  "description": "MCP server providing deterministic, citation-complete access to Kenya statutes and case law",
+  "description": "Model Context Protocol (MCP) server for querying Kenya legal databases, including court judgments, Acts of Parliament, daily cause lists, and official Gazettes.",
   "type": "module",
   "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "bin": {
-    "kenya-law-mcp": "./dist/bin.js"
+    "kenya-law-mcp": "./dist/index.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "exports": {
     ".": "./dist/index.js"
