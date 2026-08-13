@@ -50,6 +50,9 @@ Or add to your Claude Desktop JSON config file (`~/.config/Claude/claude_desktop
 }
 ```
 
+#### Step 4: Restart Claude Desktop
+Relaunch Claude Desktop. The `kenya-law` connector will automatically initialize over stdio with full local search access.
+
 ---
 
 ### Method 2: Cloudflare Remote Worker

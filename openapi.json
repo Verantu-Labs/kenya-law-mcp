@@ -7,8 +7,12 @@
   },
   "servers": [
     {
+      "url": "https://kenya-law-mcp.robinskarani1.workers.dev",
+      "description": "Cloudflare Workers Edge Server (Primary)"
+    },
+    {
       "url": "https://kenya-law-mcp.verantulabs.workers.dev",
-      "description": "Cloudflare Workers Edge Server"
+      "description": "Cloudflare Workers Edge Server (Mirror)"
     }
   ],
   "paths": {
