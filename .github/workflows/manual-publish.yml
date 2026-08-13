@@ -1,14 +1,10 @@
-name: Manual Package & Image Publish
+name: Manual Package & Deploy
 
 on:
   workflow_dispatch:
     inputs:
       publish_npm:
         description: 'Publish package to GitHub Packages / NPM'
-        type: boolean
-        default: false
-      publish_docker:
-        description: 'Build & push Docker image to GHCR'
         type: boolean
         default: false
       deploy_cloudflare:
@@ -41,24 +37,6 @@ jobs:
         run: |
           npm config set //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
           npm publish --registry=https://npm.pkg.github.com || true
-
-      - name: Log in to GitHub Container Registry
-        if: ${{ inputs.publish_docker }}
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        if: ${{ inputs.publish_docker }}
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
 
       - name: Deploy to Cloudflare Workers
         if: ${{ inputs.deploy_cloudflare }}

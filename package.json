@@ -26,7 +26,6 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "seed": "bun run src/db/seed.ts",
     "openapi": "bun run scripts/generate-openapi.ts",
     "inspector": "npx @modelcontextprotocol/inspector bun run src/index.ts"
   },

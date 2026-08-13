@@ -6,6 +6,10 @@ dist/
 build/
 out/
 
+# TypeScript & Bun Build Caches
+*.tsbuildinfo
+.bun/
+
 # Cloudflare Wrangler
 .wrangler/
 
@@ -40,3 +44,9 @@ Thumbs.db
 
 # MCP Bundles
 *.mcpb
+
+# Local documentation & scratch files
+docs/
+post.txt
+
+
