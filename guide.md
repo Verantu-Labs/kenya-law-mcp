@@ -54,3 +54,20 @@ Queries and URLs go to Kenya Law and, when using a remote server, through its ho
 ## Before merging or releasing
 
 Run `bun test`, `bun run typecheck`, `bun run build`, and `bun run test:live`. Deterministic CI must pass; live access is a separate requirement and a 403 is a failed live check. In the intended client, confirm tool discovery, court search, document retrieval and Constitution Article 50. Do not treat an Inspector connection alone as full client validation.
+
+## Command-line client checks
+
+After `bun run build`, these commands exercise the compiled server through the official MCP Inspector client:
+
+```sh
+npx --yes @modelcontextprotocol/inspector --cli node dist/src/index.js --method tools/list --strict
+npx --yes @modelcontextprotocol/inspector --cli node dist/src/index.js --method tools/call --tool-name verify_citation --tool-arg 'citation_string=[2022] KESC 8'
+```
+
+To test the Worker locally, run `bunx wrangler dev --ip 127.0.0.1 --port 8799 --local`, then use a second terminal:
+
+```sh
+npx --yes @modelcontextprotocol/inspector --cli http://127.0.0.1:8799/mcp --method resources/list
+```
+
+Inspector CLI checks cover protocol interoperability, not the Claude Desktop UI or a deployed Worker. A blocked live request is a failed access check, even when connection and discovery succeed.

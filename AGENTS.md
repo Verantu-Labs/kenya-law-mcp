@@ -13,7 +13,6 @@ src/
 ├── akn/         # Akoma Ntoso (AKN) XML & HTML parser and Markdown generator
 ├── client/      # Stateless HTTP client for Kenya Law endpoints and Atom feeds
 ├── tools/       # MCP tool handler functions (get_akn_document, verify_citation, etc.)
-├── web/         # Fallback real-time search for Kenya Law web interface
 ├── test/        # Unit & integration test suite (bun test)
 ├── index.ts     # CLI & Stdio MCP server entrypoint
 └── worker.ts    # Cloudflare Workers Edge HTTP server entrypoint
@@ -51,7 +50,7 @@ src/
 ## Domain & Network Rules
 
 - **Absolute URL Normalization**: Always convert relative AKN URIs (`/akn/ke/judgment/...`) to absolute URLs (`https://new.kenyalaw.org/...`) before invoking `fetch()`.
-- **HTTP Redirect Following**: Always use `redirect: "follow"` on fetches to `new.kenyalaw.org` to allow automatic 302 redirects to canonical expression dates (`/eng@...`).
+- **HTTP Redirect Following**: Document retrieval must validate each redirect target against the official HTTPS host/path allowlist before following it. Use the bounded document fetcher so canonical expression-date redirects (`/eng@...`) work without enabling off-host requests.
 - **Browser Headers**: Include realistic browser request headers (`User-Agent`, `Accept`, `Sec-Fetch-*`) to prevent WAF / 403 blocks.
 - **Stateless MCP Execution**: Tool handlers must remain strictly stateless to support serverless deployment targets.
 

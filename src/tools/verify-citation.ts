@@ -1,4 +1,4 @@
-import { KenyaLawClient, normalizeDocumentUrl } from "../client/kenyaLawClient.js";
+import { KenyaLawClient, normalizeDocumentUrl, neutralCitationToAknPath } from "../client/kenyaLawClient.js";
 
 type Args = {
   citation_string?: string;
@@ -14,12 +14,12 @@ export async function verifyCitation(args: Args) {
   const query = String(args.citation_string ?? args.citation ?? args.query ?? args.q ?? args.akn_url ?? args.url ?? args.uri ?? "").trim();
   try {
     if (!query) throw new Error("Missing required citation_string.");
-    let identifier: string | undefined;
+    let identifier = neutralCitationToAknPath(query);
     if (query.startsWith("/") || /^https?:/i.test(query)) {
       const url = normalizeDocumentUrl(query);
       if (!url.pathname.startsWith("/akn/ke/")) throw new Error("A directory cannot verify an individual citation.");
       identifier = url.href;
-    } else {
+    } else if (!identifier) {
       // Search results are discovery only; a matching record must also be readable.
       const normalized = query.toLowerCase().replace(/\s+/g, " ");
       if (/\b(?:act|cap|constitution)\b/i.test(query)) {

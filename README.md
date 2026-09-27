@@ -67,7 +67,7 @@ Search results and directories are discovery records. Retrieve the document befo
 
 Tools call `KenyaLawClient` directly. Court/year searches use official directories, discover station identifiers, and can inspect page 2. Other searches retain HTML and Atom-feed fallbacks. Document retrieval restricts URLs and each redirect to HTTPS Kenya Law AKN/directory paths, tries the alternate official host/source when applicable, and parses HTML/XML or supported DOCX bytes. HTML parsing removes site navigation; XML parsing includes nested AKN content. Section selection uses text-based extraction.
 
-Requests use browser-style headers and per-request timeouts, generally 6â€“15 seconds. Multiple fallbacks can take longer. One-hour process-local maps cache documents/results. There is no durable storage, and these maps are not bounded LRU caches.
+Requests use browser-style headers and per-request timeouts, generally 6–15 seconds. Multiple fallbacks can take longer. One-hour process-local maps cache documents/results. There is no durable storage, and these maps are not bounded LRU caches.
 
 ## HTTP and interoperability
 
@@ -84,7 +84,7 @@ Stdio and HTTP use the MCP SDK and share tool, resource and prompt handlers. HTT
 - Directory rendering handles court and optional year; use `search_case_law` for station/month filtering. A directory is not judgment text.
 - HTML/XML parsing, DOCX ZIP extraction and section boundaries remain heuristic. PDF extraction/OCR are not implemented: PDF-only, unrelated HTML and unreadable responses fail explicitly. Inspect returned text before citing it.
 - Bulk retrieval marks each failed document and sets top-level `isError` for partial failure.
-- Citation text requires an exact discovery-title or neutral-citation match followed by readable document retrieval. AKN inputs require readable official text. Existence does not establish current validity, a holding or judicial treatment. `check_citator` reports `not_checked`; retrieval failures are errors, not proof of nonexistence.
+- Structured neutral citations (for example `[2022] KESC 8`) resolve directly to their AKN judgment paths and must match retrieved metadata. Other citation text requires an exact discovery-title match followed by readable document retrieval. AKN inputs require readable official text. Existence does not establish current validity, a holding or judicial treatment. `check_citator` reports `not_checked`; retrieval failures are errors, not proof of nonexistence.
 - Cause-list date filtering is not implemented upstream; entries can contain default hearing/time values. Gazette retrieval uses a legacy interface. These are not verified scheduling or exhaustive notice services.
 - Absolute document URLs must use HTTPS on `kenyalaw.org` or `new.kenyalaw.org`. Redirect destinations are validated before fetching. The Worker still has no application authentication/rate limiting; operating a public deployment requires separate capacity and abuse controls.
 

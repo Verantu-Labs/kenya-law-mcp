@@ -26,6 +26,13 @@ export class KenyaLawAccessBlockedError extends Error {
   }
 }
 
+// Neutral citations encode an exact judgment identifier; this is identifier
+// parsing, not keyword search or an inference that the record exists.
+export function neutralCitationToAknPath(citation: string): string | undefined {
+  const match = citation.trim().match(/^\[(\d{4})\]\s+(KE[A-Z0-9]+)\s+([1-9]\d*)$/i);
+  return match ? `/akn/ke/judgment/${match[2]!.toLowerCase()}/${match[1]}/${match[3]}` : undefined;
+}
+
 // Validate every redirect before following it: an official initial URL alone
 // does not prevent requests to private or unrelated hosts.
 export function normalizeDocumentUrl(value: string): URL {
@@ -1152,7 +1159,12 @@ export class KenyaLawClient {
       return cached.data;
     }
 
-    const doc = await KenyaLawClient.getAknDocument(caseAknUrl);
+    const citationPath = neutralCitationToAknPath(caseAknUrl);
+    const doc = await KenyaLawClient.getAknDocument(citationPath ?? caseAknUrl);
+    if (citationPath && ![doc.title, doc.oscolaCitation].some(value =>
+      neutralCitationToAknPath(value?.match(/\[\d{4}\]\s+KE[A-Z0-9]+\s+[1-9]\d*/i)?.[0] ?? "") === citationPath)) {
+      throw new Error("The retrieved judgment metadata does not confirm the requested neutral citation.");
+    }
     if (doc.docType !== "judgment" || !doc.aknUrl?.includes("/akn/ke/judgment/")) {
       throw new Error("Citator checks require an individual judgment AKN identifier.");
     }

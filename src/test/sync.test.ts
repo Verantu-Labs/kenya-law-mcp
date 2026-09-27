@@ -200,6 +200,27 @@ describe("Synchronized retrieval regressions", () => {
     expect(JSON.parse((await searchCaseLaw({ query: "no-matching-authority" })).content[0].text).results).toEqual([]);
   });
 
+  test.each(["[2020] KEHC 991", "[2020] KEHC 992"])("neutral citations resolve directly and verify retrieved metadata: %s", async citation => {
+    const urls: string[] = [];
+    network = spyOn(globalThis, "fetch").mockImplementation(async input => {
+      urls.push(String(input));
+      return new Response('<akomaNtoso><judgment><meta><identification><FRBRWork><FRBRname value="Example v State [2020] KEHC 991"/></FRBRWork></identification></meta><judgmentBody><p>Official fixture reasons.</p></judgmentBody></judgment></akomaNtoso>');
+    });
+    const result = await verifyCitation({ citation_string: citation });
+    expect(JSON.parse(result.content[0].text).verified).toBe(citation === "[2020] KEHC 991");
+    expect(JSON.parse((await checkCitator({ case_akn_url: citation })).content[0].text).verified).toBe(citation === "[2020] KEHC 991");
+    expect(urls.every(url => url.includes(`/akn/ke/judgment/kehc/2020/${citation.endsWith("991") ? "991" : "992"}`))).toBe(true);
+    expect(urls.some(url => url.includes("/search") || url.includes("/judgments/"))).toBe(false);
+  });
+
+  test("citator accepts a neutral citation and keeps treatment unchecked", async () => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async () => new Response('<akomaNtoso><judgment><meta><identification><FRBRWork><FRBRname value="Example v State [2020] KEHC 993"/></FRBRWork></identification></meta><judgmentBody><p>Official fixture reasons.</p></judgmentBody></judgment></akomaNtoso>'));
+    const result = await checkCitator({ case_akn_url: "[2020] KEHC 993" });
+    const parsed = JSON.parse(result.content[0].text);
+    expect({ identifier: parsed.case_akn_url, verified: parsed.verified, status: parsed.status })
+      .toEqual({ identifier: "[2020] KEHC 993", verified: true, status: "not_checked" });
+  });
+
   test.each(["Matching Act", "Different Act"])("citation verification checks retrieved metadata: %s", async title => {
     network = spyOn(globalThis, "fetch").mockImplementation(async input => new Response(String(input).includes("/legislation/")
       ? `<a href="/akn/ke/act/2020/${encodeURIComponent(title)}/source">${title === "Matching Act" ? "Matching Act" : "Expected Act"}</a>`

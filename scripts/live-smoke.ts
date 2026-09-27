@@ -12,9 +12,9 @@ const judgment = await getAknDocument({ akn_url: record.akn_url });
 if (judgment.isError || judgment.content[0]!.text.length < 800) throw new Error("Judgment text retrieval failed: " + judgment.content[0]!.text.slice(0, 250));
 console.log("PASS: live judgment text retrieved.");
 
-const citation = await verifyCitation({ citation_string: record.akn_url });
+const citation = await verifyCitation({ citation_string: record.neutral_citation || record.akn_url });
 if (!JSON.parse(citation.content[0]!.text).verified) throw new Error(citation.content[0]!.text);
-const treatment = await checkCitator({ case_akn_url: record.akn_url });
+const treatment = await checkCitator({ case_akn_url: record.neutral_citation || record.akn_url });
 if (JSON.parse(treatment.content[0]!.text).status !== "not_checked") throw new Error(treatment.content[0]!.text);
 console.log("PASS: existence verification; treatment remains not_checked.");
 
