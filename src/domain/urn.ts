@@ -1,5 +1,5 @@
 /**
- * src/domain/urn.ts — Canonical Kenyan Legal Entity URN & Identifier Normalizer.
+ * src/domain/urn.ts - Canonical Kenyan Legal Entity URN & Identifier Normalizer.
  * Synthesizes stable URNs (e.g. ke:statute:employment-act-2007:s43, ke:case:kesc:2024:1)
  * from raw citations, AKN paths, and search titles.
  */
@@ -42,10 +42,10 @@ export function parseLegalUrn(input: string, titleHint?: string): CanonicalLegal
   if (cleanInput.includes("/akn/ke/")) {
     if (cleanInput.includes("/act/")) {
       const yearMatch = cleanInput.match(/\/act\/(\d{4})\/(\d+)/);
-      const year = yearMatch ? parseInt(yearMatch[1], 10) : undefined;
+      const year = yearMatch?.[1] ? parseInt(yearMatch[1], 10) : undefined;
       const slug = cleanInput.split("/").pop() || "statute";
       const sectionMatch = cleanInput.match(/#sec[_-]?(\d+[a-z]?)/i);
-      const section = sectionMatch ? `s${sectionMatch[1]}` : undefined;
+      const section = sectionMatch?.[1] ? `s${sectionMatch[1]}` : undefined;
 
       const urn = section ? `ke:statute:${slug}:${section}` : `ke:statute:${slug}`;
 

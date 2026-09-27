@@ -1,9 +1,9 @@
 /**
- * src/domain/knowledge-core.ts — Core Legal Knowledge Layer for Kenyan Law.
+ * src/domain/knowledge-core.ts - Core Legal Knowledge Layer for Kenyan Law.
  * Wraps low-level HTTP/AKN client and exposes domain entities, search, citations, and graph relationships.
  */
 
-import { KenyaLawClient, type CitatorResult, type CaseSearchResult, type StatuteSearchResult } from "../client/kenyaLawClient.js";
+import { KenyaLawClient } from "../client/kenyaLawClient.js";
 import { parseLegalUrn, type CanonicalLegalEntity } from "./urn.js";
 import { buildLegalProvenance, type LegalProvenance } from "./provenance.js";
 
@@ -59,7 +59,12 @@ export class KenyaLawKnowledgeCore {
    */
   static async search(query: string, options: { court?: string; yearFrom?: number; limit?: number } = {}) {
     const limit = options.limit || 10;
-    const cases = await KenyaLawClient.searchCaseLaw(query, options.court, options.yearFrom, limit);
+    let cases: any[] = [];
+    try {
+      cases = await KenyaLawClient.searchCaseLaw(query, options.court, options.yearFrom, limit);
+    } catch (err: any) {
+      if (!err?.isBlocked && !err?.message?.includes("403")) throw err;
+    }
     const statutes = await KenyaLawClient.searchLegislation(query, limit);
 
     const results = [

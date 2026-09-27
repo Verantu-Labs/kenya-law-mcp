@@ -1,6 +1,8 @@
 /**
- * kenyaLawWeb.ts — High-performance real-time web fetcher & in-memory cache for Kenya Law (kenyalaw.org/caselaw/)
+ * kenyaLawWeb.ts - High-performance real-time web fetcher & in-memory cache for Kenya Law (new.kenyalaw.org & kenyalaw.org)
  */
+
+import { BROWSER_HEADERS, KenyaLawAccessBlockedError } from "../client/kenyaLawClient.js";
 
 export interface LiveCaseResult {
   case_title: string;
@@ -42,39 +44,55 @@ export async function searchLiveKenyaLaw(
 
   try {
     const encodedQuery = encodeURIComponent(query);
-    const searchUrl = `http://kenyalaw.org/caselaw/cases/search?search_words=${encodedQuery}`;
+    const searchUrl = `https://new.kenyalaw.org/judgments/?q=${encodedQuery}`;
 
-    const response = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Solon-Legal-AI/1.0 (Verantu Labs; +https://verantulabs.com)",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Connection": "keep-alive",
-      },
-      signal: AbortSignal.timeout(3000), // 3s aggressive timeout for fast agent feedback
-    });
+    let response = await fetch(searchUrl, {
+      headers: BROWSER_HEADERS,
+      redirect: "follow",
+      signal: AbortSignal.timeout(6000),
+    }).catch(() => null);
 
-    if (!response.ok) {
-      console.warn(`[kenyaLawWeb] kenyalaw.org returned HTTP ${response.status}`);
+    if (!response || !response.ok) {
+      const altUrl = `https://kenyalaw.org/judgments/?q=${encodedQuery}`;
+      const altRes = await fetch(altUrl, {
+        headers: BROWSER_HEADERS,
+        redirect: "follow",
+        signal: AbortSignal.timeout(6000),
+      }).catch(() => null);
+      if (altRes && altRes.ok) {
+        response = altRes;
+      } else if (altRes && altRes.status === 403 && (!response || response.status === 403)) {
+        response = altRes;
+      }
+    }
+
+    if (response && response.status === 403) {
+      throw new KenyaLawAccessBlockedError(`Kenya Law web search access blocked (HTTP 403 Forbidden) for '${query}'`);
+    }
+
+    if (!response || !response.ok) {
       return [];
     }
 
     const html = await response.text();
     const results: LiveCaseResult[] = [];
 
-    // Parse HTML case items from kenyalaw.org caselaw search results
-    const linkRegex = /<a\s+[^>]*href=["'](http:\/\/kenyalaw\.org\/caselaw\/cases\/view\/[^"']+)["'][^>]*>(.*?)<\/a>/gi;
+    // Parse HTML case items from judgments search results
+    const linkRegex = /<a\s+[^>]*href=["']((?:\/akn\/ke\/judgment\/|https?:\/\/(?:new\.)?kenyalaw\.org\/caselaw\/cases\/view\/)[^"']+)["'][^>]*>(.*?)<\/a>/gi;
     let match: RegExpExecArray | null;
 
     while ((match = linkRegex.exec(html)) !== null && results.length < limit) {
-      const url = match[1];
-      const rawTitle = match[2].replace(/<[^>]+>/g, "").trim();
+      if (!match[1] || !match[2]) continue;
+      const rawUrl = match[1].trim();
+      const url = rawUrl.startsWith("http") ? rawUrl : `https://new.kenyalaw.org${rawUrl}`;
+      const rawTitle = match[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 
-      if (!rawTitle || rawTitle.toLowerCase().includes("next") || rawTitle.toLowerCase().includes("previous")) {
+      if (!rawTitle || rawTitle.toLowerCase().includes("next") || rawTitle.toLowerCase().includes("previous") || rawTitle.toLowerCase() === "search") {
         continue;
       }
 
       // Extract neutral citation if present, e.g. [2024] eKLR or [2024] KEHC 123
-      const citMatch = rawTitle.match(/\[\d{4}\]\s+eKLR|\[\d{4}\]\s+KE[A-Z]+\s+\d+/i);
+      const citMatch = rawTitle.match(/\[\d{4}\]\s*(?:eKLR|KE[A-Z0-9]+\s+\d+)/i);
       const neutralCitation = citMatch ? citMatch[0] : undefined;
 
       results.push({
@@ -91,6 +109,9 @@ export async function searchLiveKenyaLaw(
 
     return results;
   } catch (err: unknown) {
+    if (err instanceof KenyaLawAccessBlockedError || (err as any)?.isBlocked) {
+      throw err;
+    }
     console.warn("[kenyaLawWeb] Live fetch from kenyalaw.org failed/timed out:", err);
     return [];
   }

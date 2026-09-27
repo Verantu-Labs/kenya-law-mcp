@@ -38,11 +38,52 @@ describe("Akoma Ntoso (AKN) XML Parser", () => {
   });
 
   test("handles empty or html fallbacks without crashing", () => {
-    const htmlText = "<html><body><h1>High Court Judgment</h1><p>Paragraph 1 text</p></body></html>";
+    const htmlText = `<!DOCTYPE html>
+      <html><body>
+        <header>Site navigation that must not be treated as judgment text</header>
+        <main><article>
+          <h1>High Court Judgment</h1>
+          <p>Paragraph 1 text</p>
+        </article></main>
+        <footer>Site footer that must not be treated as judgment text</footer>
+      </body></html>`;
     const parsed = parseAknXml(htmlText, "/akn/ke/judgment/kehc/2026/1");
     expect(parsed.title).toBe("High Court Judgment");
     expect(parsed.markdown).toContain("High Court Judgment");
     expect(parsed.markdown).toContain("Paragraph 1 text");
+    expect(parsed.markdown).not.toContain("Site navigation");
+    expect(parsed.markdown).not.toContain("Site footer");
+  });
+
+  test("renders paragraphs nested inside AKN content containers", () => {
+    const sampleXml = `<?xml version="1.0" encoding="UTF-8"?>
+    <akomaNtoso>
+      <judgment>
+        <meta>
+          <identification>
+            <FRBRWork>
+              <FRBRname value="Sample Judgment"/>
+            </FRBRWork>
+          </identification>
+        </meta>
+        <judgmentBody>
+          <section eId="sec_1">
+            <num>1.</num>
+            <heading>Introduction</heading>
+            <content>
+              <p>The court considered the evidence before it.</p>
+              <subsection>
+                <content><p>The reasons follow from the applicable law.</p></content>
+              </subsection>
+            </content>
+          </section>
+        </judgmentBody>
+      </judgment>
+    </akomaNtoso>`;
+
+    const parsed = parseAknXml(sampleXml, "/akn/ke/judgment/kehc/2026/1");
+    expect(parsed.markdown).toContain("The court considered the evidence before it.");
+    expect(parsed.markdown).toContain("The reasons follow from the applicable law.");
   });
 });
 

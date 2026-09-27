@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * kenya-law-mcp — High-Performance Stateless Akoma Ntoso (AKN) MCP Server.
+ * kenya-law-mcp - High-Performance Stateless Akoma Ntoso (AKN) MCP Server.
  * Exposes Kenya statutes, case law, daily cause lists, and citators directly to AI agents.
  */
 
 import { Server } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { ToolSchema } from "@modelcontextprotocol/core";
-import { z } from "zod";
+import { pathToFileURL } from "node:url";
 
-export type Tool = z.infer<typeof ToolSchema>;
+export type Tool = typeof ToolSchema._output;
 
 import { getAknDocument } from "./tools/get-akn-document.js";
 import { searchCaseLaw } from "./tools/search-case-law.js";
@@ -20,6 +20,17 @@ import { searchGazettes } from "./tools/search-gazettes.js";
 import { verifyCitation } from "./tools/verify-citation.js";
 import { getDocumentsBulk } from "./tools/get-documents-bulk.js";
 
+export {
+  getAknDocument,
+  searchCaseLaw,
+  searchLegislation,
+  getCauseList,
+  checkCitator,
+  searchGazettes,
+  verifyCitation,
+  getDocumentsBulk,
+};
+
 import { RESOURCE_TEMPLATES, STATIC_RESOURCES, readMcpResource } from "./mcp/resources/resource-handler.js";
 
 export { KenyaLawClient } from "./client/kenyaLawClient.js";
@@ -29,13 +40,21 @@ export const TOOLS: Tool[] = [
   {
     name: "get_akn_document",
     description:
-      "Fetches a raw Akoma Ntoso (AKN) legal document (Act, Judgment, or Legal Notice) by AKN URI or URL, converting XML tags into structured non-truncated Markdown with OSCOLA citations.",
+      "Fetches a raw Akoma Ntoso (AKN) legal document (Act, Judgment, or Legal Notice) or court judgment directory (e.g. /judgments/KESC/2022/) by AKN URI or URL, converting XML/HTML into structured non-truncated Markdown with OSCOLA citations.",
     inputSchema: {
       type: "object",
       properties: {
         akn_url: {
           type: "string",
-          description: "The Akoma Ntoso URI or URL (e.g. '/akn/ke/act/2010/4' or '/akn/ke/judgment/kehc/2026/8198')",
+          description: "The Akoma Ntoso URI or URL (e.g. '/akn/ke/act/2010/4' or '/judgments/KESC/2022/')",
+        },
+        section: {
+          type: "string",
+          description: "Optional section number to extract directly (e.g. '12' or 'Section 12')",
+        },
+        article: {
+          type: "string",
+          description: "Optional article number to extract directly for constitutions (e.g. '1', '2', '22')",
         },
       },
       required: ["akn_url"],
@@ -60,17 +79,33 @@ export const TOOLS: Tool[] = [
   {
     name: "search_case_law",
     description:
-      "Stateless real-time search across Kenyan High Court, Court of Appeal, and Supreme Court judgments. Returns AKN URIs, case names, and neutral citations.",
+      "Stateless real-time search across Kenyan Courts (Supreme Court KESC, Court of Appeal KECA, High Court KEHC, Environment & Land Court KEELC, Employment & Labour Relations Court KEELRC, Tribunals). Supports keyword search, citations, or court and year directory queries (e.g. court: 'KESC', year: 2022). Returns AKN URIs, case names, and citations.",
     inputSchema: {
       type: "object",
       properties: {
         query: {
           type: "string",
-          description: "Legal issue or search keywords (e.g. 'unfair termination of employment')",
+          description: "Legal issue or search keywords (e.g. 'unfair termination' or 'Supreme Court 2022'). Optional if court and year are provided.",
         },
         court: {
           type: "string",
-          description: "Court level filter (e.g. 'KESC', 'KECA', 'KEHC', 'KEELRC')",
+          description: "Court code or name (e.g. 'KESC', 'KECA', 'KEHC', 'KEELRC', 'Supreme Court', 'Court of Appeal')",
+        },
+        court_code: {
+          type: "string",
+          description: "Court acronym alias (e.g. 'KESC', 'KECA', 'KEHC')",
+        },
+        court_station: {
+          type: "string",
+          description: "Court station filter (e.g. 'Meru' or 'High Court at Meru').",
+        },
+        month: {
+          type: "number",
+          description: "Decision month number (1-12) when querying a station directory.",
+        },
+        year: {
+          type: "number",
+          description: "Specific judgment year (e.g. 2022)",
         },
         year_from: {
           type: "number",
@@ -81,7 +116,6 @@ export const TOOLS: Tool[] = [
           description: "Maximum results to return (default: 10, max: 50)",
         },
       },
-      required: ["query"],
     },
   },
   {
@@ -497,9 +531,10 @@ async function main() {
 }
 
 // Only start stdio listener if executed directly via CLI
-if (import.meta.url === `file://${process.argv[1]}`) {
+declare const process: { argv?: string[]; exit?: (code?: number) => void } | undefined;
+if (import.meta.main || (typeof process !== "undefined" && process?.argv?.[1] && import.meta.url === pathToFileURL(process.argv[1]).href)) {
   main().catch((err) => {
     console.error("Fatal error starting Kenya Law MCP server:", err);
-    process.exit(1);
+    process?.exit?.(1);
   });
 }
