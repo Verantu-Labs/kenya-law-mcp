@@ -1,6 +1,6 @@
 /**
  * src/mcp/resources/resource-handler.ts — MCP Resources & Resource Templates Handler.
- * Exposes canonical legal entities as read-only MCP resources for Claude Desktop, Cursor, and Solon.
+ * Exposes canonical legal entities as read-only MCP resources for MCP clients.
  */
 
 import { KenyaLawKnowledgeCore } from "../../domain/knowledge-core.js";

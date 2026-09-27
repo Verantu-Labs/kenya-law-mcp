@@ -4,17 +4,17 @@
   "private": true,
   "description": "Model Context Protocol (MCP) server for querying Kenya legal databases, including court judgments, Acts of Parliament, daily cause lists, and official Gazettes.",
   "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/src/index.js",
+  "module": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
   "bin": {
-    "kenya-law-mcp": "./dist/index.js"
+    "kenya-law-mcp": "./dist/src/index.js"
   },
   "publishConfig": {
     "access": "public"
   },
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/src/index.js"
   },
   "files": [
     "dist",

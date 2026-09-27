@@ -18,7 +18,7 @@
   "paths": {
     "/api/v1/get_akn_document": {
       "post": {
-        "summary": "Fetches a raw Akoma Ntoso (AKN) legal document (Act, Judgment, or Legal Notice) by AKN URI or URL, converting XML tags into structured non-truncated Markdown with OSCOLA citations.",
+        "summary": "Fetches a raw Akoma Ntoso (AKN) legal document (Act, Judgment, or Legal Notice) or court judgment directory (e.g. /judgments/KESC/2022/) by AKN URI or URL, converting XML/HTML into structured non-truncated Markdown with OSCOLA citations.",
         "operationId": "get_akn_document",
         "requestBody": {
           "required": true,
@@ -29,7 +29,15 @@
                 "properties": {
                   "akn_url": {
                     "type": "string",
-                    "description": "The Akoma Ntoso URI or URL (e.g. '/akn/ke/act/2010/4' or '/akn/ke/judgment/kehc/2026/8198')"
+                    "description": "The Akoma Ntoso URI or URL (e.g. '/akn/ke/act/2010/4' or '/judgments/KESC/2022/')"
+                  },
+                  "section": {
+                    "type": "string",
+                    "description": "Optional section number to extract directly (e.g. '12' or 'Section 12')"
+                  },
+                  "article": {
+                    "type": "string",
+                    "description": "Optional article number to extract directly for constitutions (e.g. '1', '2', '22')"
                   }
                 },
                 "required": [
@@ -53,9 +61,49 @@
         }
       }
     },
+    "/api/v1/get_documents_bulk": {
+      "post": {
+        "summary": "Fetches up to 10 Akoma Ntoso (AKN) legal documents in parallel in a single API call to save context tokens and round-trips.",
+        "operationId": "get_documents_bulk",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "akn_urls": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Array of up to 10 Akoma Ntoso URIs or URLs to fetch"
+                  }
+                },
+                "required": [
+                  "akn_urls"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response from Kenya Law AKN service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/search_case_law": {
       "post": {
-        "summary": "Stateless real-time search across Kenyan High Court, Court of Appeal, and Supreme Court judgments. Returns AKN URIs, case names, and neutral citations.",
+        "summary": "Stateless real-time search across Kenyan Courts (Supreme Court KESC, Court of Appeal KECA, High Court KEHC, Environment & Land Court KEELC, Employment & Labour Relations Court KEELRC, Tribunals). Supports keyword search, citations, or court and year directory queries (e.g. court: 'KESC', year: 2022). Returns AKN URIs, case names, and citations.",
         "operationId": "search_case_law",
         "requestBody": {
           "required": true,
@@ -66,11 +114,27 @@
                 "properties": {
                   "query": {
                     "type": "string",
-                    "description": "Legal issue or search keywords (e.g. 'unfair termination of employment')"
+                    "description": "Legal issue or search keywords (e.g. 'unfair termination' or 'Supreme Court 2022'). Optional if court and year are provided."
                   },
                   "court": {
                     "type": "string",
-                    "description": "Court level filter (e.g. 'KESC', 'KECA', 'KEHC', 'KEELRC')"
+                    "description": "Court code or name (e.g. 'KESC', 'KECA', 'KEHC', 'KEELRC', 'Supreme Court', 'Court of Appeal')"
+                  },
+                  "court_code": {
+                    "type": "string",
+                    "description": "Court acronym alias (e.g. 'KESC', 'KECA', 'KEHC')"
+                  },
+                  "court_station": {
+                    "type": "string",
+                    "description": "Court station filter (e.g. 'Meru' or 'High Court at Meru')."
+                  },
+                  "month": {
+                    "type": "number",
+                    "description": "Decision month number (1-12) when querying a station directory."
+                  },
+                  "year": {
+                    "type": "number",
+                    "description": "Specific judgment year (e.g. 2022)"
                   },
                   "year_from": {
                     "type": "number",
@@ -80,10 +144,7 @@
                     "type": "number",
                     "description": "Maximum results to return (default: 10, max: 50)"
                   }
-                },
-                "required": [
-                  "query"
-                ]
+                }
               }
             }
           }
@@ -202,6 +263,43 @@
                 },
                 "required": [
                   "case_akn_url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response from Kenya Law AKN service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/verify_citation": {
+      "post": {
+        "summary": "Verifies whether a legal citation string or neutral citation exists on Kenya Law, grounding LLM output and preventing hallucinations.",
+        "operationId": "verify_citation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "citation_string": {
+                    "type": "string",
+                    "description": "The citation to verify (e.g. '[2022] KESC 8' or 'Employment Act')"
+                  }
+                },
+                "required": [
+                  "citation_string"
                 ]
               }
             }
