@@ -7,6 +7,8 @@ import { getDocumentsBulk } from "../tools/get-documents-bulk.js";
 import { searchCaseLaw } from "../tools/search-case-law.js";
 import { searchLegislation } from "../tools/search-legislation.js";
 import { verifyCitation } from "../tools/verify-citation.js";
+import { getCauseList } from "../tools/get-cause-list.js";
+import { searchGazettes } from "../tools/search-gazettes.js";
 import { checkCitator } from "../tools/check-citator.js";
 import { handleStatelessMcpRequest, TOOLS } from "../index.js";
 import worker from "../worker.js";
@@ -62,8 +64,8 @@ describe("Synchronized retrieval regressions", () => {
     const result = await getAknDocument({ akn_url: "/akn/ke/act/2018/901/source" });
     expect(result.content[0].text).toContain("Fixture provision.");
     expect(requests).toEqual([
-      { url: "https://new.kenyalaw.org/akn/ke/act/2018/901/source", redirect: "follow", timeout: true },
-      { url: "https://kenyalaw.org/akn/ke/act/2018/901/source", redirect: "follow", timeout: true },
+      { url: "https://new.kenyalaw.org/akn/ke/act/2018/901/source", redirect: "manual", timeout: true },
+      { url: "https://kenyalaw.org/akn/ke/act/2018/901/source", redirect: "manual", timeout: true },
     ]);
   });
 
@@ -106,7 +108,7 @@ describe("Synchronized retrieval regressions", () => {
   });
 
   test("section extraction returns a bounded provision and missing sections fail", async () => {
-    network = spyOn(globalThis, "fetch").mockImplementation(async () => new Response('<html><title>Fixture Act</title><main><p>12. Duties</p><p>The officer shall keep records.</p><p>13. Offences</p><p>The penalty follows.</p></main></html>'));
+    network = spyOn(globalThis, "fetch").mockImplementation(async () => new Response('<html><title>Fixture Act</title><main class="akn-act"><p>12. Duties</p><p>The officer shall keep records.</p><p>13. Offences</p><p>The penalty follows.</p></main></html>'));
     const result = await getAknDocument({ akn_url: "/akn/ke/act/2018/906/source", section: "12" });
     expect(result.content[0].text).toContain("The officer shall keep records.");
     expect(result.content[0].text).not.toContain("The penalty follows.");
@@ -131,11 +133,90 @@ describe("Synchronized retrieval regressions", () => {
   test("missing tool identifiers and non-array bulk inputs fail before fetching", async () => {
     network = spyOn(globalThis, "fetch");
     for (const tool of TOOLS) {
-      const result = await handleStatelessMcpRequest({ id: 1, method: "tools/call", params: { name: tool.name, arguments: {} } });
+      const result = await handleStatelessMcpRequest({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool.name, arguments: {} } });
       expect(result.result.isError).toBe(true);
     }
     expect((await getDocumentsBulk({ akn_urls: "invalid" as unknown as string[] })).isError).toBe(true);
     expect(network).not.toHaveBeenCalled();
+  });
+
+  test.each([500, 429])("upstream HTTP %i is an error across search tools", async status => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async () => new Response("upstream failure", { status }));
+    const results = [
+      await searchCaseLaw({ query: `failure-${status}` }),
+      await searchLegislation({ act_name: `Failure Act ${status}` }),
+      await getCauseList({ court_station: `Failure Station ${status}` }),
+      await searchGazettes({ query: `failure-${status}` }),
+      await verifyCitation({ citation_string: `Failure Citation ${status}` }),
+    ];
+    expect(results.map(result => result.isError)).toEqual(Array(5).fill(true));
+  });
+
+  test("search network failures cannot become successful empty results", async () => {
+    network = spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Network unavailable"));
+    expect((await searchCaseLaw({ query: "offline-query" })).isError).toBe(true);
+    expect((await searchLegislation({ act_name: "Offline Act" })).isError).toBe(true);
+  });
+
+  test.each(["https://example.com/akn/ke/act/2020/1", "http://kenyalaw.org/akn/ke/act/2020/1",
+    "https://kenyalaw.org@127.0.0.1/akn/ke/act/2020/1", "https://new.kenyalaw.org:8443/akn/ke/act/2020/1",
+    "//127.0.0.1/akn/ke/act/2020/1", "https://new.kenyalaw.org/akn/../../private"])("rejects unsafe document URL before network access: %s", async url => {
+    network = spyOn(globalThis, "fetch");
+    expect((await getAknDocument({ akn_url: url })).isError).toBe(true);
+    expect(JSON.parse((await verifyCitation({ citation_string: url })).content[0].text).verified).toBe(false);
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  test("rejects off-host redirects without fetching the destination", async () => {
+    const urls: string[] = [];
+    network = spyOn(globalThis, "fetch").mockImplementation(async input => {
+      urls.push(String(input));
+      return new Response(null, { status: 302, headers: { Location: "http://127.0.0.1/private" } });
+    });
+    expect((await getAknDocument({ akn_url: "/akn/ke/act/2020/redirect" })).isError).toBe(true);
+    expect(urls.every(url => new URL(url).hostname.endsWith("kenyalaw.org"))).toBe(true);
+  });
+
+  test("follows a canonical official redirect", async () => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async input => String(input).endsWith("/source")
+      ? new Response('<akomaNtoso><act><body><section><content><p>Redirected provision.</p></content></section></body></act></akomaNtoso>')
+      : new Response(null, { status: 302, headers: { Location: "/akn/ke/act/2020/redirected/source" } }));
+    expect((await getAknDocument({ akn_url: "/akn/ke/act/2020/redirected" })).content[0].text).toContain("Redirected provision.");
+  });
+
+  test.each(["%PDF-1.7 raw binary", '<html><title>Unrelated page</title><main>Not a judgment.</main></html>',
+    '<akomaNtoso><judgment><meta><publication name="Fake"/></meta></judgment></akomaNtoso>'])("unreadable content cannot verify a record: %s", async body => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async () => new Response(body));
+    const url = `/akn/ke/judgment/kehc/2020/${encodeURIComponent(body.slice(0, 12))}/source`;
+    expect((await getAknDocument({ akn_url: url })).isError).toBe(true);
+    expect(JSON.parse((await verifyCitation({ citation_string: url })).content[0].text).verified).toBe(false);
+    expect(JSON.parse((await checkCitator({ case_akn_url: url })).content[0].text).verified).toBe(false);
+  });
+
+  test("an unrelated Atom entry does not become a search match", async () => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async input => new Response(String(input).includes("feeds")
+      ? '<feed><entry><title>Unrelated v State</title><link href="https://new.kenyalaw.org/akn/ke/judgment/kehc/2020/992"/></entry></feed>'
+      : "<html><main>No results</main></html>"));
+    expect(JSON.parse((await searchCaseLaw({ query: "no-matching-authority" })).content[0].text).results).toEqual([]);
+  });
+
+  test.each(["Matching Act", "Different Act"])("citation verification checks retrieved metadata: %s", async title => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async input => new Response(String(input).includes("/legislation/")
+      ? `<a href="/akn/ke/act/2020/${encodeURIComponent(title)}/source">${title === "Matching Act" ? "Matching Act" : "Expected Act"}</a>`
+      : `<akomaNtoso><act><meta><identification><FRBRWork><FRBRname value="${title}"/></FRBRWork></identification></meta><body><section><content><p>Matching provision.</p></content></section></body></act></akomaNtoso>`));
+    const result = await verifyCitation({ citation_string: title === "Matching Act" ? "Matching Act" : "Expected Act" });
+    expect(JSON.parse(result.content[0].text).verified).toBe(title === "Matching Act");
+  });
+
+  test("bulk retrieval preserves successful documents and marks partial failures", async () => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async input => String(input).includes("/bad/")
+      ? new Response("unavailable", { status: 500 })
+      : new Response('<akomaNtoso><act><body><section><content><p>Readable bulk provision.</p></content></section></body></act></akomaNtoso>'));
+    const result = await getDocumentsBulk({ akn_urls: ["/akn/ke/act/2020/bulk/source", "/akn/ke/act/2020/bad/source"] });
+    expect(result.isError).toBe(true);
+    const documents = JSON.parse(result.content[0].text).documents;
+    expect(documents[0].markdown).toContain("Readable bulk provision.");
+    expect(documents[1].isError).toBe(true);
   });
 
   test("Worker REST route executes the synchronized search handler", async () => {
@@ -176,6 +257,14 @@ test.each(["2025-03-26", "2025-11-25"])("standalone stdio initializes, lists and
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "search_case_law", arguments: {} } }) + "\n");
     child.stdin.flush();
     expect((await readResponse()).result.isError).toBe(true);
+    for (const [id, method, property] of [[4, "resources/list", "resources"], [5, "resources/templates/list", "resourceTemplates"], [6, "prompts/list", "prompts"]] as const) {
+      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method }) + "\n");
+      child.stdin.flush();
+      expect((await readResponse()).result[property].length).toBeGreaterThan(0);
+    }
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 7, method: "resources/read", params: { uri: "kenyalaw://missing" } }) + "\n");
+    child.stdin.flush();
+    expect((await readResponse()).error.code).toBe(-32602);
   } finally {
     clearTimeout(timeout);
     await reader.cancel();

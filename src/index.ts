@@ -4,7 +4,7 @@
  * Exposes Kenya statutes, case law, daily cause lists, and citators directly to AI agents.
  */
 
-import { Server } from "@modelcontextprotocol/server";
+import { Server, LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, ProtocolError } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { ToolSchema } from "@modelcontextprotocol/core";
 import { pathToFileURL } from "node:url";
@@ -159,7 +159,7 @@ export const TOOLS: Tool[] = [
   {
     name: "check_citator",
     description:
-      "Extracts subsequent history and citing references for a precedent (Is it still good law? Check followed, distinguished, or overruled status).",
+      "Checks whether an official judgment can be retrieved. Subsequent treatment is not checked; this cannot establish good-law status.",
     inputSchema: {
       type: "object",
       properties: {
@@ -217,6 +217,7 @@ export function createMcpServer() {
       capabilities: {
         tools: {},
         resources: {},
+        prompts: {},
       },
     }
   );
@@ -225,38 +226,14 @@ export function createMcpServer() {
     return { tools: TOOLS };
   });
 
-  server.setRequestHandler("tools/call", async (request, _ctx) => {
-    const { name, arguments: args = {} } = request.params;
-
-    switch (name) {
-      case "get_akn_document":
-        return getAknDocument(args as any);
-      case "get_documents_bulk":
-        return getDocumentsBulk(args as any);
-      case "search_case_law":
-        return searchCaseLaw(args as any);
-      case "search_legislation":
-        return searchLegislation(args as any);
-      case "get_cause_list":
-        return getCauseList(args as any);
-      case "check_citator":
-        return checkCitator(args as any);
-      case "verify_citation":
-        return verifyCitation(args as any);
-      case "search_gazettes":
-        return searchGazettes(args as any);
-      default:
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Unknown tool '${name}'. Available tools are: ${TOOLS.map((t) => t.name).join(", ")}.`,
-            },
-          ],
-          isError: true,
-        };
-    }
-  });
+  // Both transports dispatch through the same handlers and expose the same capabilities.
+  for (const method of ["tools/call", "resources/list", "resources/templates/list", "resources/read", "prompts/list", "prompts/get"] as const) {
+    server.setRequestHandler(method, async request => {
+      const response = await handleStatelessMcpRequest({ jsonrpc: "2.0", id: 1, ...request });
+      if (response.error) throw new ProtocolError(response.error.code, response.error.message);
+      return response.result;
+    });
+  }
 
   return server;
 }
@@ -265,7 +242,7 @@ export const PROMPTS = [
   {
     name: "research_case_precedent",
     title: "Research Kenyan Case Precedent",
-    description: "Guides the LLM through searching case law, fetching full AKN judgments, verifying precedent treatment, and formatting OSCOLA citations.",
+    description: "Guides the LLM through searching case law, fetching full AKN judgments, reporting the limits of treatment checking, and formatting OSCOLA citations.",
     arguments: [
       {
         name: "issue",
@@ -306,15 +283,22 @@ export const PROMPTS = [
 ];
 
 export async function handleStatelessMcpRequest(
-  payload: any,
-  headers?: Record<string, string>
+  payload: any
 ): Promise<any> {
-  const method = headers?.["mcp-method"] || payload?.method;
-  const requestId = payload?.id ?? 1;
+  if (!payload || Array.isArray(payload) || payload.jsonrpc !== "2.0" || typeof payload.method !== "string"
+    || (payload.id !== undefined && typeof payload.id !== "number" && typeof payload.id !== "string")
+    || (payload.params !== undefined && (!payload.params || typeof payload.params !== "object" || Array.isArray(payload.params)))) {
+    return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid JSON-RPC request" } };
+  }
+  if (payload.id === undefined) return null;
+  const method = payload.method;
+  const requestId = payload.id;
+  if (method === "ping") return { jsonrpc: "2.0", id: requestId, result: {} };
 
   if (method === "initialize") {
-    // Return the protocol version requested by the client or default to latest "2026-07-28"
-    const requestedVersion = payload?.params?.protocolVersion || "2026-07-28";
+    // Negotiate only protocol versions implemented by the installed MCP SDK.
+    const requestedVersion = SUPPORTED_PROTOCOL_VERSIONS.includes(payload?.params?.protocolVersion)
+      ? payload.params.protocolVersion : LATEST_PROTOCOL_VERSION;
     return {
       jsonrpc: "2.0",
       id: requestId,
@@ -404,7 +388,7 @@ export async function handleStatelessMcpRequest(
               role: "user",
               content: {
                 type: "text",
-                text: `Please conduct comprehensive Kenyan case law research on '${issue}'${courtStr}.\n\nFollow these steps:\n1. Use \`search_case_law\` to find relevant precedents for '${issue}'.\n2. Use \`get_akn_document\` or \`get_documents_bulk\` to fetch the full text of top matching judgments.\n3. Check precedent treatment using \`check_citator\` for key cases.\n4. Provide a structured legal analysis with proper OSCOLA citations.`,
+                text: `Please conduct comprehensive Kenyan case law research on '${issue}'${courtStr}.\n\nFollow these steps:\n1. Use \`search_case_law\` to find relevant precedents for '${issue}'.\n2. Use \`get_akn_document\` or \`get_documents_bulk\` to fetch the full text of top matching judgments.\n3. Report that subsequent treatment is not checked by \`check_citator\` for key cases.\n4. Provide a structured legal analysis with proper OSCOLA citations.`,
               },
             },
           ],
@@ -425,7 +409,7 @@ export async function handleStatelessMcpRequest(
               role: "user",
               content: {
                 type: "text",
-                text: `Please verify the Kenyan legal citation '${citation}':\n\n1. Call \`verify_citation\` with citation_string '${citation}'.\n2. If verified, call \`get_akn_document\` using the returned \`akn_url\` to inspect the official text.\n3. Confirm whether it is valid law and provide the full title and citation summary.`,
+                text: `Please verify the Kenyan legal citation '${citation}':\n\n1. Call \`verify_citation\` with citation_string '${citation}'.\n2. If verified, call \`get_akn_document\` using the returned \`akn_url\` to inspect the official text.\n3. Report whether an official record was retrieved, without asserting current legal validity and provide the full title and citation summary.`,
               },
             },
           ],
@@ -462,7 +446,7 @@ export async function handleStatelessMcpRequest(
   }
 
   if (method === "tools/call") {
-    const toolName = headers?.["mcp-name"] || payload?.params?.name;
+    const toolName = payload?.params?.name;
     const toolArgs = payload?.params?.arguments || {};
 
     let toolResult: any;

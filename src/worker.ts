@@ -1,15 +1,28 @@
-import { handleStatelessMcpRequest, TOOLS } from "./index.js";
+import { createMcpServer, handleStatelessMcpRequest, TOOLS } from "./index.js";
+import { LATEST_PROTOCOL_VERSION, WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server";
 import openapiSchema from "../openapi.json";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, Mcp-Method, Mcp-Name, Mcp-Version",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, Accept",
 };
 
 export default {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+
+    // This public read-only Worker accepts HTTPS browser origins. Reject opaque,
+    // malformed and insecure origins; local stdio does not expose an HTTP listener.
+    const origin = request.headers.get("origin");
+    if (origin) {
+      try {
+        const parsed = new URL(origin);
+        if (parsed.protocol !== "https:" || parsed.origin !== origin) return new Response("Invalid Origin", { status: 403 });
+      } catch {
+        return new Response("Invalid Origin", { status: 403 });
+      }
+    }
 
     // Handle CORS preflight options
     if (request.method === "OPTIONS") {
@@ -29,7 +42,7 @@ export default {
       return new Response(
         JSON.stringify({
           status: "online",
-          specVersion: "2026-07-28 (Stateless MCP)",
+          specVersion: LATEST_PROTOCOL_VERSION,
           server: "kenya-law-mcp",
           version: "0.2.0",
           runtime: "Cloudflare Workers",
@@ -46,11 +59,8 @@ export default {
     if (request.method === "POST" && url.pathname.startsWith("/api/v1/")) {
       const toolName = url.pathname.replace("/api/v1/", "").trim();
       try {
-        const body = await request.json().catch(() => ({}));
-        const headers: Record<string, string> = {};
-        request.headers.forEach((val, key) => {
-          headers[key.toLowerCase()] = val;
-        });
+        const body = await request.json();
+        if (!body || typeof body !== "object" || Array.isArray(body)) return new Response("Expected a JSON object", { status: 400, headers: CORS_HEADERS });
 
         const responseJson = await handleStatelessMcpRequest(
           {
@@ -58,8 +68,7 @@ export default {
             id: 1,
             method: "tools/call",
             params: { name: toolName, arguments: body },
-          },
-          headers
+          }
         );
 
         if (responseJson?.error) {
@@ -78,48 +87,28 @@ export default {
         return new Response(
           JSON.stringify({ error: `Internal execution error: ${err?.message || err}` }),
           {
-            status: 500,
+            status: err instanceof SyntaxError ? 400 : 500,
             headers: { "Content-Type": "application/json", ...CORS_HEADERS },
           }
         );
       }
     }
 
-    // 2026-07-28 Stateless MCP POST Handler (Single endpoint / or /mcp)
-    if (request.method === "POST") {
-      try {
-        const payload = await request.json().catch(() => ({}));
-        const headers: Record<string, string> = {};
-        request.headers.forEach((val, key) => {
-          headers[key.toLowerCase()] = val;
-        });
-
-        // Evaluate request statelessly (No session state, no handshake required)
-        const responseJson = await handleStatelessMcpRequest(payload, headers);
-
-        return new Response(JSON.stringify(responseJson), {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
-            "X-MCP-Protocol-Version": "2026-07-28",
-            ...CORS_HEADERS,
-          },
-        });
-      } catch (err: any) {
-        return new Response(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id: null,
-            error: { code: -32603, message: `Internal server error: ${err?.message || err}` },
-          }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-          }
-        );
-      }
+    if (url.pathname !== "/" && url.pathname !== "/mcp") {
+      return new Response("Not Found", { status: 404, headers: CORS_HEADERS });
     }
-
-    return new Response("Not Found", { status: 404, headers: CORS_HEADERS });
+    if (request.method !== "POST") {
+      return new Response("No server event stream is available", { status: 405, headers: { ...CORS_HEADERS, Allow: "POST, OPTIONS" } });
+    }
+    const server = createMcpServer();
+    const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
+    try {
+      await server.connect(transport);
+      const response = await transport.handleRequest(request);
+      return new Response(response.body, { status: response.status,
+        headers: { ...Object.fromEntries(response.headers), ...CORS_HEADERS } });
+    } finally {
+      await server.close();
+    }
   },
 };

@@ -96,9 +96,10 @@ export function parseAknXml(xmlContent: string, fallbackUrl?: string): ParsedAkn
       const { md, count } = renderElementToMarkdown(bodyObj);
       markdownLines.push(md);
       sectionCounter = count;
+      if (!md.trim()) docType = "unknown";
     } else {
-      // Direct text fallback if body schema varies
-      markdownLines.push(cleanXmlText(xmlContent));
+      // Metadata without a recognized body cannot establish readable legal text.
+      docType = "unknown";
     }
 
     return {
@@ -239,7 +240,8 @@ function parseHtmlFallback(htmlContent: string, fallbackUrl?: string): ParsedAkn
     .trim();
 
   const lowerUrl = (fallbackUrl || "").toLowerCase();
-  const docType: ParsedAknDocument["docType"] =
+  const hasDocumentMarkup = /class=["'][^"']*\bakn-(?:akomaNtoso|act|judgment|document)\b/i.test(htmlContent);
+  const docType: ParsedAknDocument["docType"] = !hasDocumentMarkup || !cleanText ? "unknown" :
     lowerUrl.includes("/act/") || cleanText.includes("LAWS OF KENYA")
       ? "act"
       : (lowerUrl.includes("/judgment/") || cleanText.includes("JUDGMENT") || cleanText.includes("RULING") ? "judgment" : "unknown");
@@ -289,8 +291,4 @@ function extractDate(metaObj: any): string | null {
     return metaObj.identification.FRBRWork.FRBRdate["@_date"];
   }
   return null;
-}
-
-function cleanXmlText(xml: string): string {
-  return xml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }

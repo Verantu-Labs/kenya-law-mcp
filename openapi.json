@@ -247,7 +247,7 @@
     },
     "/api/v1/check_citator": {
       "post": {
-        "summary": "Extracts subsequent history and citing references for a precedent (Is it still good law? Check followed, distinguished, or overruled status).",
+        "summary": "Checks whether an official judgment can be retrieved. Subsequent treatment is not checked; this cannot establish good-law status.",
         "operationId": "check_citator",
         "requestBody": {
           "required": true,

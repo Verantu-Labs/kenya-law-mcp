@@ -32,23 +32,29 @@ export async function searchGazettes(args: Args) {
     };
   }
 
-  const limit = Math.min(args.limit ?? 10, 50);
-  const results = await KenyaLawClient.searchGazettes(query, limit);
+  try {
+    const limit = Math.min(args.limit ?? 10, 50);
+    const results = await KenyaLawClient.searchGazettes(query, limit);
 
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: JSON.stringify(
-          {
-            query,
-            count: results.length,
-            results,
-          },
-          null,
-          2
-        ),
-      },
-    ],
-  };
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(
+            {
+              query,
+              count: results.length,
+              results,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  } catch (error: any) {
+    return { content: [{ type: "text" as const, text: JSON.stringify({
+      error: error?.message || String(error), isBlocked: Boolean(error?.isBlocked),
+    }) }], isError: true };
+  }
 }

@@ -70,7 +70,7 @@ export async function checkCitator(args: Args) {
             case_akn_url: caseAknUrl,
             error: err?.message || String(err),
             isBlocked,
-            status: isBlocked ? "blocked" : "not_found",
+            status: isBlocked ? "blocked" : "not_checked",
             treatment_note: isBlocked ? "Kenya Law portal access blocked (HTTP 403 Forbidden)." : undefined,
           }, null, 2),
         },

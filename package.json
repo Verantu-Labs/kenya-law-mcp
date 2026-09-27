@@ -23,11 +23,12 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch src/index.ts",
-    "build": "tsc",
+    "build": "bun run scripts/build.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "openapi": "bun run scripts/generate-openapi.ts",
-    "inspector": "npx @modelcontextprotocol/inspector bun run src/index.ts"
+    "inspector": "npx @modelcontextprotocol/inspector bun run src/index.ts",
+    "test:live": "bun run scripts/live-smoke.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",

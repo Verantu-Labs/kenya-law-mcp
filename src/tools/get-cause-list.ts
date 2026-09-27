@@ -32,23 +32,29 @@ export async function getCauseList(args: Args) {
     };
   }
 
-  const results = await KenyaLawClient.getCauseList(courtStation, args.date);
+  try {
+    const results = await KenyaLawClient.getCauseList(courtStation, args.date);
 
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: JSON.stringify(
-          {
-            court_station: courtStation,
-            date: args.date || new Date().toISOString().split("T")[0],
-            count: results.length,
-            cause_list: results,
-          },
-          null,
-          2
-        ),
-      },
-    ],
-  };
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(
+            {
+              court_station: courtStation,
+              date: args.date || new Date().toISOString().split("T")[0],
+              count: results.length,
+              cause_list: results,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  } catch (error: any) {
+    return { content: [{ type: "text" as const, text: JSON.stringify({
+      error: error?.message || String(error), isBlocked: Boolean(error?.isBlocked),
+    }) }], isError: true };
+  }
 }

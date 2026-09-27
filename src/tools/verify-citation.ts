@@ -1,5 +1,4 @@
-import { KenyaLawClient } from "../client/kenyaLawClient.js";
-import { searchLiveKenyaLaw } from "../web/kenyaLawWeb.js";
+import { KenyaLawClient, normalizeDocumentUrl } from "../client/kenyaLawClient.js";
 
 type Args = {
   citation_string?: string;
@@ -12,206 +11,49 @@ type Args = {
 };
 
 export async function verifyCitation(args: Args) {
-  const query = String(
-    args.citation_string ??
-    args.citation ??
-    args.query ??
-    args.q ??
-    args.akn_url ??
-    args.url ??
-    args.uri ??
-    ""
-  ).trim();
-
-  if (!query) {
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify({
-            error: "Missing required citation identifier. Pass 'citation_string' (or 'citation', 'query', 'akn_url') with a neutral citation or Akoma Ntoso URI.",
-            received_parameters: Object.keys(args),
-          }),
-        },
-      ],
-      isError: true,
-    };
-  }
-
-  let blockedError: string | undefined;
-
-  // 1. Direct Akoma Ntoso URI/URL resolution if input contains AKN pattern
-  if (query.includes("/akn/") || query.startsWith("http://") || query.startsWith("https://")) {
-    try {
-      const doc = await KenyaLawClient.getAknDocument(query);
-      if (doc && doc.markdown) {
-        if (doc.markdown.includes("Document Lookup Error")) {
-          if (doc.markdown.includes("403") || doc.markdown.toLowerCase().includes("blocked")) {
-            blockedError = `Kenya Law portal access blocked (HTTP 403 Forbidden) while retrieving '${query}'.`;
-          }
-        } else {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify(
-                  {
-                    verified: true,
-                    type: doc.docType === "act" ? "statute" : "case_law",
-                    citation_string: query,
-                    matched_title: doc.title,
-                    neutral_citation: doc.oscolaCitation || doc.title,
-                    akn_url: doc.aknUrl || query,
-                    url: query.startsWith("http") ? query : `https://kenyalaw.org${query.startsWith("/") ? "" : "/"}${query}`,
-                    oscola_citation: doc.oscolaCitation,
-                    message: `Successfully verified official Kenya Law record: ${doc.title}`,
-                  },
-                  null,
-                  2
-                ),
-              },
-            ],
-          };
-        }
-      }
-    } catch (err: any) {
-      if (err?.isBlocked || err?.message?.includes("403")) {
-        blockedError = err.message || "Kenya Law portal access blocked (HTTP 403 Forbidden).";
-      }
-    }
-  }
-
-  const qLower = query.toLowerCase();
-
-  // Try searching legislation first if query looks like Act/No/Cap
-  if (/act|cap|no\./i.test(query)) {
-    try {
-      const statutes = await KenyaLawClient.searchLegislation(query, 3);
-      const match = statutes.find(s => s.short_title.toLowerCase().includes(qLower) || s.akn_url.toLowerCase().includes(qLower));
-      if (match) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({
-                verified: true,
-                type: "statute",
-                citation_string: query,
-                matched_title: match.short_title,
-                akn_url: match.akn_url,
-                url: match.url,
-              }, null, 2),
-            },
-          ],
-        };
-      }
-    } catch (err: any) {
-      if (err?.isBlocked || err?.message?.includes("403") || err?.name === "KenyaLawAccessBlockedError") {
-        blockedError = err.message || "Kenya Law legislation access blocked (HTTP 403 Forbidden).";
-      }
-    }
-  }
-
-  // Search case law
-  let cases: any[] = [];
+  const query = String(args.citation_string ?? args.citation ?? args.query ?? args.q ?? args.akn_url ?? args.url ?? args.uri ?? "").trim();
   try {
-    cases = await KenyaLawClient.searchCaseLaw(query, undefined, undefined, 3);
-  } catch (err: any) {
-    if (err?.isBlocked || err?.message?.includes("403") || err?.name === "KenyaLawAccessBlockedError") {
-      blockedError = err.message || "Kenya Law portal access blocked (HTTP 403 Forbidden).";
+    if (!query) throw new Error("Missing required citation_string.");
+    let identifier: string | undefined;
+    if (query.startsWith("/") || /^https?:/i.test(query)) {
+      const url = normalizeDocumentUrl(query);
+      if (!url.pathname.startsWith("/akn/ke/")) throw new Error("A directory cannot verify an individual citation.");
+      identifier = url.href;
     } else {
-      throw err;
+      // Search results are discovery only; a matching record must also be readable.
+      const normalized = query.toLowerCase().replace(/\s+/g, " ");
+      if (/\b(?:act|cap|constitution)\b/i.test(query)) {
+        const statutes = await KenyaLawClient.searchLegislation(query, 10);
+        identifier = statutes.find(record => record.short_title.toLowerCase().replace(/\s+/g, " ") === normalized)?.akn_url;
+      } else {
+        const cases = await KenyaLawClient.searchCaseLaw(query, undefined, undefined, 10);
+        identifier = cases.find(record => [record.case_title, record.neutral_citation].some(value =>
+          value?.toLowerCase().replace(/\s+/g, " ") === normalized))?.akn_url;
+      }
     }
-  }
-
-  const caseMatch = cases.find(c => c.case_title.toLowerCase().includes(qLower) || c.akn_url.toLowerCase().includes(qLower) || (c.neutral_citation && c.neutral_citation.toLowerCase().includes(qLower)));
-  if (caseMatch) {
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify({
-            verified: true,
-            type: "case_law",
-            citation_string: query,
-            matched_title: caseMatch.case_title,
-            neutral_citation: caseMatch.neutral_citation,
-            akn_url: caseMatch.akn_url,
-            url: caseMatch.url,
-            oscola_citation: caseMatch.oscola_citation,
-          }, null, 2),
-        },
-      ],
-    };
-  }
-
-  // Live website search fallback
-  let liveResults: any[] = [];
-  try {
-    liveResults = await searchLiveKenyaLaw(query, 3);
-  } catch (err: any) {
-    if (err?.isBlocked || err?.message?.includes("403") || err?.name === "KenyaLawAccessBlockedError") {
-      blockedError = err.message || "Kenya Law portal access blocked (HTTP 403 Forbidden).";
+    if (!identifier) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ verified: false, citation_string: query,
+        message: "No exact matching record was found. This does not establish that the authority is absent." }) }], isError: true };
     }
+    const doc = await KenyaLawClient.getAknDocument(identifier);
+    if (doc.docType === "unknown") throw new Error("The record has no recognized document text.");
+    if (!query.startsWith("/") && !/^https?:/i.test(query)) {
+      const normalized = query.toLowerCase().replace(/\s+/g, " ");
+      const identifiers = [doc.title, doc.oscolaCitation, doc.title.match(/\[\d{4}\]\s*KE[A-Z0-9]+\s+\d+/i)?.[0]];
+      if (!identifiers.some(value => value?.toLowerCase().replace(/\s+/g, " ") === normalized)) {
+        throw new Error("The retrieved document metadata does not confirm the requested citation.");
+      }
+    }
+    return { content: [{ type: "text" as const, text: JSON.stringify({ verified: true,
+      type: doc.docType === "act" ? "statute" : doc.docType === "judgment" ? "case_law" : "legal_notice",
+      citation_string: query, matched_title: doc.title, neutral_citation: doc.oscolaCitation,
+      akn_url: doc.aknUrl || identifier, url: normalizeDocumentUrl(identifier).href,
+      oscola_citation: doc.oscolaCitation,
+      message: "An official record was retrieved. Existence does not establish current validity or judicial treatment.",
+    }, null, 2) }] };
+  } catch (error: any) {
+    return { content: [{ type: "text" as const, text: JSON.stringify({ verified: false, citation_string: query,
+      error: error?.message || String(error), isBlocked: Boolean(error?.isBlocked),
+    }) }], isError: true };
   }
-  const matchedLive = liveResults.find(
-    (r) =>
-      r.case_title.toLowerCase().includes(qLower) ||
-      (r.neutral_citation && r.neutral_citation.toLowerCase().includes(qLower))
-  );
-
-  if (matchedLive) {
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify(
-            {
-              verified: true,
-              type: "case_law",
-              citation_string: query,
-              matched_title: matchedLive.case_title,
-              neutral_citation: matchedLive.neutral_citation,
-              url: matchedLive.url,
-              oscola_citation: matchedLive.oscola_citation,
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
-  }
-
-  if (blockedError) {
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify({
-            verified: false,
-            isBlocked: true,
-            error: blockedError,
-            citation_string: query,
-            message: `Kenya Law portal access blocked (HTTP 403 Forbidden). Could not verify '${query}' against upstream portal.`,
-          }, null, 2),
-        },
-      ],
-      isError: true,
-    };
-  }
-
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: JSON.stringify({
-          verified: false,
-          citation_string: query,
-          message: `Citation '${query}' could not be verified on Kenya Law. Check neutral citation format (e.g. '[2022] KESC 8').`,
-        }, null, 2),
-      },
-    ],
-    isError: true,
-  };
 }

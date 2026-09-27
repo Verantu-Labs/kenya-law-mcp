@@ -1,6 +1,6 @@
 # Kenya Law MCP (`@verantu-labs/kenya-law-mcp`)
 
-Independent MCP server for public Kenya Law judgments and legislation, with local stdio and the repository's existing Cloudflare Worker HTTP/REST adapter. No application backend, account, provider key, database, or external workspace is required.
+Independent MCP server for public Kenya Law judgments and legislation, with local stdio and Cloudflare Worker Streamable HTTP/REST support. No application backend, account, provider key, database, or external workspace is required.
 
 ## Local installation
 
@@ -65,43 +65,41 @@ Search results and directories are discovery records. Retrieve the document befo
 
 ## Retrieval and architecture
 
-Tools call `KenyaLawClient` directly. Court/year searches use official directories, discover station identifiers, and can inspect page 2. Other searches retain HTML and Atom-feed fallbacks. Document retrieval normalizes relative URLs, follows redirects, tries the alternate official host/source when applicable, and parses HTML/XML or supported DOCX bytes. HTML parsing removes site navigation; XML parsing includes nested AKN content. Section selection uses text-based extraction.
+Tools call `KenyaLawClient` directly. Court/year searches use official directories, discover station identifiers, and can inspect page 2. Other searches retain HTML and Atom-feed fallbacks. Document retrieval restricts URLs and each redirect to HTTPS Kenya Law AKN/directory paths, tries the alternate official host/source when applicable, and parses HTML/XML or supported DOCX bytes. HTML parsing removes site navigation; XML parsing includes nested AKN content. Section selection uses text-based extraction.
 
-Requests use browser-style headers and per-request timeouts, generally 6–15 seconds. Multiple fallbacks can take longer. One-hour process-local maps cache documents/results. There is no durable storage, and these maps are not bounded LRU caches.
+Requests use browser-style headers and per-request timeouts, generally 6â€“15 seconds. Multiple fallbacks can take longer. One-hour process-local maps cache documents/results. There is no durable storage, and these maps are not bounded LRU caches.
 
 ## HTTP and interoperability
 
-The existing Worker accepts MCP JSON-RPC POSTs and exposes tools at `/api/v1/<tool_name>`. `/openapi.json` contains generated REST schemas. Replies retain MCP `content` envelopes; parse `content[0].text` for tools returning JSON. HTTP 200 alone does not establish tool success: inspect `isError`.
+The Worker uses the installed MCP SDK for Streamable HTTP at `/mcp` (and POST `/`), accepts MCP JSON-RPC POSTs and exposes tools at `/api/v1/<tool_name>`. `/openapi.json` contains generated REST schemas. Replies retain MCP `content` envelopes; parse `content[0].text` for tools returning JSON. HTTP 200 alone does not establish tool success: inspect `isError`.
 
 The existing endpoint is [kenya-law-mcp.robinskarani1.workers.dev](https://kenya-law-mcp.robinskarani1.workers.dev/). Building this checkout does not deploy it. See [guide.md](guide.md) for connection examples.
 
-Stdio uses the MCP SDK; HTTP uses the repository's existing custom adapter. Comprehensive compatibility with every ChatGPT, Claude, Codex, Cursor, Gemini or custom client is not verified. Resources/prompts are exposed by the HTTP handler; stdio currently registers tools only. Existing public prompts were retained, but treatment-check wording does not mean treatment data is available.
+Stdio and HTTP use the MCP SDK and share tool, resource and prompt handlers. HTTP notifications receive an empty 202 response; unsupported SSE GET requests return 405. The Constitution resource points to its canonical AKN identifier; case templates resolve court/year/id and statute slugs require an unambiguous search match. Individual host application UIs still require client smoke testing. The public Worker has no authentication or rate limiting; it accepts valid HTTPS browser origins for public read-only retrieval.
 
 ## Errors and inherited limitations
 
-- Recognized HTTP 403 failures produce blocked errors in case/legislation searches and citation tools. Single-document tool failures set `isError: true`. Some non-403/feed failures still become empty results; empty results do not prove an authority is absent.
-- Feed fallback can return unrelated recent items. Directory keyword matching/pagination are limited. `year_from` becomes a specific year on the directory path, not a complete lower-bound date search.
+- HTTP 403, other upstream HTTP failures and network failures return errors rather than successful empty results. Successful empty searches still do not prove an authority is absent.
+- Feed fallbacks only return matching items. Directory keyword matching/pagination remain limited. `year_from` becomes a specific year on the directory path, not a complete lower-bound date search.
 - Directory rendering handles court and optional year; use `search_case_law` for station/month filtering. A directory is not judgment text.
-- HTML/XML parsing, DOCX ZIP extraction and section boundaries are heuristic. PDF extraction/OCR are not implemented. Unexpected HTML, malformed/binary content or short documents may be misclassified. Inspect the returned text before citing it.
-- Bulk retrieval retains lookup-error Markdown and does not reliably flag partial failures at the top level.
-- Existence does not establish current validity, completeness, a holding or judicial treatment. `not_checked` replaces the previous unsupported `good_law` status.
+- HTML/XML parsing, DOCX ZIP extraction and section boundaries remain heuristic. PDF extraction/OCR are not implemented: PDF-only, unrelated HTML and unreadable responses fail explicitly. Inspect returned text before citing it.
+- Bulk retrieval marks each failed document and sets top-level `isError` for partial failure.
+- Citation text requires an exact discovery-title or neutral-citation match followed by readable document retrieval. AKN inputs require readable official text. Existence does not establish current validity, a holding or judicial treatment. `check_citator` reports `not_checked`; retrieval failures are errors, not proof of nonexistence.
 - Cause-list date filtering is not implemented upstream; entries can contain default hearing/time values. Gazette retrieval uses a legacy interface. These are not verified scheduling or exhaustive notice services.
-- Input coercion and URL handling remain permissive, including absolute document URLs and redirects. The Worker has no application authentication/rate limiting. This sync is not a public-service security-hardening release.
-- Existing resource identifier mappings remain unchanged and have limitations; prefer direct AKN tool calls.
-
-This update synchronizes the established retrieval implementation. It does not add a different search API, document-processing dependencies, transport architecture or broader behavioral repairs.
+- Absolute document URLs must use HTTPS on `kenyalaw.org` or `new.kenyalaw.org`. Redirect destinations are validated before fetching. The Worker still has no application authentication/rate limiting; operating a public deployment requires separate capacity and abuse controls.
 
 ## Development
 
 ```sh
 bun install --frozen-lockfile
 bun test
+bun run test:live
 bun run typecheck
 bun run build
 bun run openapi
 ```
 
-The inherited suite includes live requests and depends on portal availability. `bun test src/test/sync.test.ts` exercises deterministic network-boundary fixtures, real parsing and a real stdio subprocess. Coverage includes directories, station discovery, host fallback, stored/deflated DOCX, sections, blocked access, document network failures, empty results, missing inputs, citator semantics and Worker dispatch. No lint command is configured.
+`bun test` is deterministic and does not require portal access. It exercises real parsing/tool handlers with network-boundary fixtures, the production Worker transport, and real stdio subprocesses. `bun run test:live` separately checks court search, judgment retrieval, citation existence, Constitution Article 50 and legislation search against Kenya Law. It fails explicitly on blocked access; run it from the intended deployment network before release. No lint command is configured.
 
 Runtime dependencies remain the MCP SDK and `fast-xml-parser`. Regenerate `openapi.json` when `TOOLS` changes; the generator preserves this repository's existing deployment URLs.
 

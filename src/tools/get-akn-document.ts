@@ -59,24 +59,6 @@ export async function getAknDocument(args: Args) {
     };
   }
 
-  if (doc.markdown && doc.markdown.includes("Document Lookup Error")) {
-    const errorDetails = doc.markdown.replace(/^#\s*Document Lookup Error\s*/i, "").trim();
-    const isBlocked = Boolean(errorDetails.includes("403") || errorDetails.toLowerCase().includes("blocked"));
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify({
-            error: `Failed to fetch Kenya Law AKN document '${aknUrl}': ${errorDetails}`,
-            isBlocked,
-            akn_url: aknUrl,
-          }),
-        },
-      ],
-      isError: true,
-    };
-  }
-
   const targetSection = String(args.section ?? args.article ?? args.sec ?? args.art ?? "").trim();
   if (targetSection && doc.markdown) {
     const num = targetSection.replace(/^(?:article|section|art\.|s\.)\s*/i, "").trim();

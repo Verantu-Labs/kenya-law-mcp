@@ -25,9 +25,9 @@ Use Claude Desktop's local MCP configuration (`claude_desktop_config.json`), as 
 
 Replace the example path with your checkout. Local stdio handshakes, tool discovery and calls are tested; the Claude Desktop UI itself is not covered by this repository's tests. Local servers and remote connectors are [separate connection mechanisms](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp).
 
-## Existing remote adapter
+## Remote HTTP transport
 
-Use the existing [Worker URL](https://kenya-law-mcp.robinskarani1.workers.dev/) in clients supporting HTTP MCP. For REST/OpenAPI integrations, use [/openapi.json](https://kenya-law-mcp.robinskarani1.workers.dev/openapi.json).
+Use the [Worker MCP URL](https://kenya-law-mcp.robinskarani1.workers.dev/mcp) in clients supporting HTTP MCP. For REST/OpenAPI integrations, use [/openapi.json](https://kenya-law-mcp.robinskarani1.workers.dev/openapi.json).
 
 Local builds and tests do not deploy this branch. A remote server can still expose older tool definitions.
 
@@ -50,3 +50,7 @@ The reply is an MCP tool envelope. Check `isError`, then parse `content[0].text`
 Directory listings and metadata do not establish a holding. Consult official text and the [documented limitations](README.md#errors-and-inherited-limitations).
 
 Queries and URLs go to Kenya Law and, when using a remote server, through its host. This server does not need local legal workspaces or client documents. Avoid confidential facts in search queries.
+
+## Before merging or releasing
+
+Run `bun test`, `bun run typecheck`, `bun run build`, and `bun run test:live`. Deterministic CI must pass; live access is a separate requirement and a 403 is a failed live check. In the intended client, confirm tool discovery, court search, document retrieval and Constitution Article 50. Do not treat an Inspector connection alone as full client validation.

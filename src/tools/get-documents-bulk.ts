@@ -26,18 +26,23 @@ export async function getDocumentsBulk(args: Args) {
   const targetUrls = urls.slice(0, 10);
   const docs = await Promise.all(
     targetUrls.map(async (url) => {
-      const doc = await KenyaLawClient.getAknDocument(url);
-      return {
-        akn_url: url,
-        title: doc.title,
-        doc_type: doc.docType,
-        oscola_citation: doc.oscolaCitation,
-        markdown: doc.markdown,
-      };
+      try {
+        const doc = await KenyaLawClient.getAknDocument(url);
+        return {
+          akn_url: url,
+          title: doc.title,
+          doc_type: doc.docType,
+          oscola_citation: doc.oscolaCitation,
+          markdown: doc.markdown,
+        };
+      } catch (error: any) {
+        return { akn_url: url, error: error?.message || String(error), isError: true };
+      }
     })
   );
 
   return {
+    ...(docs.some(doc => doc.isError) ? { isError: true } : {}),
     content: [
       {
         type: "text" as const,
