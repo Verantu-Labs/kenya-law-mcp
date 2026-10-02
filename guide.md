@@ -1,68 +1,73 @@
-# How to Use Kenya Law MCP in Claude & ChatGPT
+# Connecting Kenya Law MCP
 
-A simple guide for lawyers to connect live Kenya legal databases (case law, statutes, cause lists, gazettes) to Claude and ChatGPT.
+Install this repository as described in [README.md](README.md). No API key is required by the server.
 
----
+## Local stdio
 
-## Quick Links
+Configure the client's MCP server command as `bun`, with arguments `run` and the absolute path to `src/index.ts`.
 
-- **Claude / MCP Server Link**: `https://kenya-law-mcp.robinskarani1.workers.dev/`
-- **ChatGPT Action Schema Link**: `https://kenya-law-mcp.robinskarani1.workers.dev/openapi.json`
+Alternatively, build with `bun run build` and configure `node` with the absolute path to `dist/src/index.js`. Keep dependencies installed beside compiled files. Local stdio sends retrieval requests directly from the machine running the server.
 
----
+### Claude Desktop
 
-## 1. How to Connect to Claude (Claude Desktop & Web)
+Use Claude Desktop's local MCP configuration (`claude_desktop_config.json`), as described in the [official MCP guide](https://github.com/modelcontextprotocol/docs/blob/main/quickstart/user.mdx). Add the `mcpServers` entry from the README alongside existing entries and restart Claude Desktop. Use an absolute executable path if `bun` or `node` is not visible to desktop applications through PATH. The compiled Node configuration on Windows can look like:
 
-1. Open **Claude Desktop**.
-2. Click **Claude** in the top menu $\rightarrow$ Open **Settings** (or press `Cmd + ,` on Mac / `Ctrl + ,` on Windows).
-3. Select **Connectors** (or **Developer / MCP**) $\rightarrow$ Click **Add New Connector**.
-4. Fill in the form:
-   - **Name**: `Kenya Law MCP`
-   - **URL**: `https://kenya-law-mcp.robinskarani1.workers.dev/`
-5. Click **Save** / **Connect**.
+```json
+{
+  "mcpServers": {
+    "kenya-law": {
+      "command": "node",
+      "args": ["D:/projects/kenya-law-mcp/dist/src/index.js"]
+    }
+  }
+}
+```
 
----
+Replace the example path with your checkout. Local stdio handshakes, tool discovery and calls are tested; the Claude Desktop UI itself is not covered by this repository's tests. Local servers and remote connectors are [separate connection mechanisms](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp).
 
-## 2. How to Connect to ChatGPT (Custom GPTs)
+## Remote HTTP transport
 
-### Step 1: Create a Custom GPT
-1. Open [ChatGPT](https://chatgpt.com) $\rightarrow$ Click **Explore GPTs** in the sidebar $\rightarrow$ Click **+ Create** (top right).
-2. Click the **Configure** tab.
-3. Name your GPT (e.g. `Kenya Legal Assistant`).
+Use the [Worker MCP URL](https://kenya-law-mcp.robinskarani1.workers.dev/mcp) in clients supporting HTTP MCP. For REST/OpenAPI integrations, use [/openapi.json](https://kenya-law-mcp.robinskarani1.workers.dev/openapi.json).
 
-### Step 2: Write Your System Instructions (Custom Prompts)
-You can write any system instructions tailored to your specific law practice! Here are a few examples you can copy or modify:
+Local builds and tests do not deploy this branch. A remote server can still expose older tool definitions.
 
-- **General Litigation Practice**:
-  > *"You are an expert Kenyan legal research assistant. Always cross-reference statutory provisions and case law citations against the Kenya Law database tools. Provide accurate OSCOLA citations and highlight authoritative holdings."*
+REST example:
 
-- **Employment & Labour Law Practice**:
-  > *"You are a specialized Employment & Labour Law assistant in Kenya. Focus on the Employment Act 2007, ELRC judgments, constructive dismissal precedents, and statutory notice periods."*
+```sh
+curl https://kenya-law-mcp.robinskarani1.workers.dev/api/v1/search_case_law \
+  -H 'Content-Type: application/json' \
+  -d '{"court":"KESC","year":2022,"limit":3}'
+```
 
-- **Commercial & Corporate Practice**:
-  > *"You are a corporate legal assistant in Kenya. Search the Companies Act 2015, Tax Appeals Tribunal decisions, and High Court Commercial Division precedents."*
+The reply is an MCP tool envelope. Check `isError`, then parse `content[0].text` where appropriate. HTTP 200 does not confirm upstream access or citation verification.
 
-### Step 3: Add the Kenya Law Action
-1. Scroll down to **Actions** $\rightarrow$ Click **Create new action**.
-2. In **Import from URL**, paste:
-   `https://kenya-law-mcp.robinskarani1.workers.dev/openapi.json`
-3. Click **Import**. *(Or copy-paste the text from `openapi.json` directly into the Schema text box).*
-4. Leave **Authentication** set to **None**.
-5. Click **Save** / **Publish**.
+## Research sequence
 
----
+1. Search with explicit court/year/station filters, or call `search_legislation` with an Act title.
+2. Retrieve returned AKN identifiers with `get_akn_document`; inspect any requested section/article.
+3. Use `verify_citation` for record matching. `check_citator` reports `not_checked` for judicial treatment; it does not establish whether a decision remains good law.
 
-## 3. Sample Legal Research Prompts
+Directory listings and metadata do not establish a holding. Consult official text and the [documented limitations](README.md#errors-and-inherited-limitations).
 
-Once connected, ask questions naturally:
+Queries and URLs go to Kenya Law and, when using a remote server, through its host. This server does not need local legal workspaces or client documents. Avoid confidential facts in search queries.
 
-- **Precedents**: *"Find recent Court of Appeal decisions on wrongful termination under Section 45 of the Employment Act."*
-- **Statutes**: *"Pull Section 31 of the Data Protection Act 2019 and explain the DPIA requirements."*
-- **Citation Check**: *"Verify Giella v Cassman Brown [1973] EA 358 and check if it has been overruled or distinguished."*
-- **Daily Cause List**: *"Get today's cause list for Milimani High Court Commercial Division."*
+## Before merging or releasing
 
----
+Run `bun test`, `bun run typecheck`, `bun run build`, and `bun run test:live`. Deterministic CI must pass; live access is a separate requirement and a 403 is a failed live check. In the intended client, confirm tool discovery, court search, document retrieval and Constitution Article 50. Do not treat an Inspector connection alone as full client validation.
 
-## Best Practices
-- **Verify Citations**: Always cross-check AI-retrieved cases and statutory sections against official reporters or printed gazettes before filing court pleadings.
-- **Client Confidentiality**: Avoid typing confidential client names or privileged information into prompt text.
+## Command-line client checks
+
+After `bun run build`, these commands exercise the compiled server through the official MCP Inspector client:
+
+```sh
+npx --yes @modelcontextprotocol/inspector --cli node dist/src/index.js --method tools/list --strict
+npx --yes @modelcontextprotocol/inspector --cli node dist/src/index.js --method tools/call --tool-name verify_citation --tool-arg 'citation_string=[2022] KESC 8'
+```
+
+To test the Worker locally, run `bunx wrangler dev --ip 127.0.0.1 --port 8799 --local`, then use a second terminal:
+
+```sh
+npx --yes @modelcontextprotocol/inspector --cli http://127.0.0.1:8799/mcp --method resources/list
+```
+
+Inspector CLI checks cover protocol interoperability, not the Claude Desktop UI or a deployed Worker. A blocked live request is a failed access check, even when connection and discovery succeed.

@@ -1,5 +1,5 @@
 /**
- * akn/parser.ts — Robust Akoma Ntoso (AKN) XML to Markdown parser.
+ * akn/parser.ts - Robust Akoma Ntoso (AKN) XML to Markdown parser.
  * Converts Kenya Law AKN documents (<act>, <judgment>, <section>, <paragraph>)
  * into clean, non-truncated structured Markdown.
  */
@@ -96,9 +96,10 @@ export function parseAknXml(xmlContent: string, fallbackUrl?: string): ParsedAkn
       const { md, count } = renderElementToMarkdown(bodyObj);
       markdownLines.push(md);
       sectionCounter = count;
+      if (!md.trim()) docType = "unknown";
     } else {
-      // Direct text fallback if body schema varies
-      markdownLines.push(cleanXmlText(xmlContent));
+      // Metadata without a recognized body cannot establish readable legal text.
+      docType = "unknown";
     }
 
     return {
@@ -137,13 +138,9 @@ function renderElementToMarkdown(node: any, level = 1): { md: string; count: num
     return { md: result.trim(), count };
   }
 
-  // Handle AKN tags
-  const num = node.num ? (typeof node.num === "object" ? node.num["#text"] || "" : node.num) : "";
-  const heading = node.heading ? (typeof node.heading === "object" ? node.heading["#text"] || "" : node.heading) : "";
-
   // Section / Article / Clause
-  if (node.section || node.article || node.clause || node.paragraph) {
-    const items = node.section || node.article || node.clause || node.paragraph;
+  if (node.section || node.article || node.clause || node.paragraph || node.subsection || node.subparagraph) {
+    const items = node.section || node.article || node.clause || node.paragraph || node.subsection || node.subparagraph;
     const itemList = Array.isArray(items) ? items : [items];
 
     for (const item of itemList) {
@@ -180,6 +177,9 @@ function renderElementToMarkdown(node: any, level = 1): { md: string; count: num
   if (node.wrapUp) {
     result += `${renderElementToMarkdown(node.wrapUp, level).md}\n\n`;
   }
+  if (node.content) {
+    result += `${renderElementToMarkdown(node.content, level).md}\n\n`;
+  }
 
   // Direct text node
   if (node["#text"]) {
@@ -189,29 +189,68 @@ function renderElementToMarkdown(node: any, level = 1): { md: string; count: num
   return { md: result.trim(), count };
 }
 
-/**
- * Fallback parser for HTML or non-standard text.
- */
 function parseHtmlFallback(htmlContent: string, fallbackUrl?: string): ParsedAknDocument {
-  // Strip tags and format headings cleanly
-  const titleMatch = htmlContent.match(/<title[^>]*>(.*?)<\/title>/i) || htmlContent.match(/<h1[^>]*>(.*?)<\/h1>/i);
-  const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, "").trim() : "Kenyan Legal Document";
+  // 1. Extract title
+  const titleMatch =
+    htmlContent.match(/<title[^>]*>(.*?)<\/title>/i) ||
+    htmlContent.match(/<h1[^>]*>(.*?)<\/h1>/i);
+  let title = titleMatch?.[1] ? titleMatch[1].replace(/<[^>]+>/g, "").trim() : "Kenyan Legal Document";
+  title = title.replace(/\s+-\s+Kenya Law$/i, "").replace(/&amp;/g, "&").trim();
 
-  const cleanText = htmlContent
+  // 2. Locate content boundary to strip external navbars, headers, and footers
+  let targetHtml = htmlContent;
+  const coverIdx = htmlContent.indexOf('<div class="coverpage">');
+  const aknIdx = htmlContent.indexOf('<span class="akn-akomaNtoso">');
+  const docIdx = htmlContent.search(/<div[^>]*class=["'][^"']*(?:akn-document|judgment|act-body|content-container)[^"']*["']/i);
+  const mainIdx = htmlContent.indexOf('<main');
+  const articleIdx = htmlContent.indexOf('<article');
+
+  const startIdx = coverIdx !== -1
+    ? coverIdx
+    : (aknIdx !== -1 ? aknIdx : (docIdx !== -1 ? docIdx : (mainIdx !== -1 ? mainIdx : (articleIdx !== -1 ? articleIdx : 0))));
+
+  targetHtml = targetHtml.slice(startIdx);
+
+  const footerIdx = targetHtml.indexOf('<footer');
+  if (footerIdx !== -1) {
+    targetHtml = targetHtml.slice(0, footerIdx);
+  }
+
+  // 3. Clean tags into structured markdown
+  const cleanText = targetHtml
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<h[1-6][^>]*>(.*?)<\/h[1-6]>/gi, "\n### $1\n")
-    .replace(/<p[^>]*>/gi, "\n")
+    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
+    .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
+    .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, "")
+    .replace(/<p[^>]*>/gi, "\n\n")
+    .replace(/<div[^>]*>/gi, "\n")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#160;/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n[ \t]+/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+
+  const lowerUrl = (fallbackUrl || "").toLowerCase();
+  const hasDocumentMarkup = /class=["'][^"']*\bakn-(?:akomaNtoso|act|judgment|document)\b/i.test(htmlContent);
+  const docType: ParsedAknDocument["docType"] = !hasDocumentMarkup || !cleanText ? "unknown" :
+    lowerUrl.includes("/act/") || cleanText.includes("LAWS OF KENYA")
+      ? "act"
+      : (lowerUrl.includes("/judgment/") || cleanText.includes("JUDGMENT") || cleanText.includes("RULING") ? "judgment" : "unknown");
 
   const markdown = `# ${title}\n\n${fallbackUrl ? `**AKN URI**: ${fallbackUrl}\n\n---\n\n` : ""}${cleanText}`;
 
   return {
     title,
-    docType: "unknown",
+    docType,
     aknUrl: fallbackUrl,
     markdown,
     sectionsCount: 1,
@@ -252,8 +291,4 @@ function extractDate(metaObj: any): string | null {
     return metaObj.identification.FRBRWork.FRBRdate["@_date"];
   }
   return null;
-}
-
-function cleanXmlText(xml: string): string {
-  return xml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }

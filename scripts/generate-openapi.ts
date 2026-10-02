@@ -43,13 +43,17 @@ function buildOpenApiSpec() {
     openapi: "3.0.3",
     info: {
       title: "Kenya Law Akoma Ntoso (AKN) API",
-      description: "Deterministic API for Kenya statutes, case law, daily cause lists, and citators.",
+      description: "API endpoint connecting AI clients to Kenya statutes, High Court and Appellate judgments, daily cause lists, and official Gazettes.",
       version: "0.2.0",
     },
     servers: [
       {
+        url: "https://kenya-law-mcp.robinskarani1.workers.dev",
+        description: "Cloudflare Workers Edge Server (Primary)",
+      },
+      {
         url: "https://kenya-law-mcp.verantulabs.workers.dev",
-        description: "Cloudflare Workers Edge Server",
+        description: "Cloudflare Workers Edge Server (Mirror)",
       },
     ],
     paths,
