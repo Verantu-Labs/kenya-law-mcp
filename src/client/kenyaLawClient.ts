@@ -397,6 +397,31 @@ function docxXmlToMarkdown(xml: string): string {
     .trim();
 }
 
+async function extractPdfText(bytes: Uint8Array): Promise<string | null> {
+  try {
+    const { extractText } = await import("unpdf");
+    const { text } = await extractText(bytes);
+    if (!text) return null;
+
+    if (Array.isArray(text)) {
+      const pages = text
+        .map((pageStr, idx) => {
+          const cleaned = pageStr.replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ").trim();
+          return `### Page ${idx + 1}\n\n${cleaned}`;
+        })
+        .filter((p) => p.length > 20);
+
+      if (pages.length === 0) return null;
+      return pages.join("\n\n---\n\n");
+    }
+
+    const singleText = String(text).trim();
+    return singleText.length > 0 ? singleText : null;
+  } catch {
+    return null;
+  }
+}
+
 export class KenyaLawClient {
   /**
    * Fetches an Akoma Ntoso document by AKN URI or URL.
@@ -474,11 +499,18 @@ export class KenyaLawClient {
         if (!response.ok) throw new Error(`HTTP ${response.status} when fetching Kenya Law document.`);
         const bytes = new Uint8Array(await response.arrayBuffer());
         const text = new TextDecoder().decode(bytes);
-        if (text.startsWith("%PDF-") || response.headers.get("content-type")?.includes("application/pdf")) {
-          throw new Error("PDF text extraction is not supported. Retrieve an HTML, AKN XML or DOCX source.");
-        }
         let parsed: ParsedAknDocument;
-        if (bytes.length > 4 && new DataView(bytes.buffer).getUint32(0, true) === 0x04034b50) {
+        if (text.startsWith("%PDF-") || response.headers.get("content-type")?.includes("application/pdf")) {
+          const pdfText = await extractPdfText(bytes);
+          if (!pdfText) throw new Error("PDF source contains no readable text streams.");
+          parsed = {
+            title: `Document ${aknUri}`,
+            docType: documentUrl.pathname.includes("/judgment/") ? "judgment" : "act",
+            aknUrl: aknUri,
+            markdown: `# Document ${aknUri}\n\n---\n\n${pdfText}`,
+            sectionsCount: Math.max(1, pdfText.split("\n\n").length),
+          };
+        } else if (bytes.length > 4 && new DataView(bytes.buffer).getUint32(0, true) === 0x04034b50) {
           const xml = await extractWordDocumentXml(bytes);
           const body = xml ? docxXmlToMarkdown(xml) : "";
           if (!body.trim()) throw new Error("DOCX source contains no readable document text.");
@@ -492,13 +524,20 @@ export class KenyaLawClient {
         } else {
           parsed = parseAknXml(text, aknUri);
           const needsFullText = parsed.docType === "unknown" || parsed.markdown.includes("Loading PDF")
-            || parsed.markdown.includes("Do you want to load it") || parsed.markdown.length < 800;
+            || parsed.markdown.includes("Do you want to load it") || text.includes('data-display-type="pdf"')
+            || parsed.markdown.length < 800;
           if (needsFullText && !documentUrl.pathname.endsWith("/source")) {
             const sourceUrl = new URL(fullUrl);
             sourceUrl.pathname = `${sourceUrl.pathname.replace(/\/$/, "")}/source`;
             const candidates = [sourceUrl.href];
             const attachment = text.match(/href="([^"]*\.docx[^"]*)"/i)?.[1];
             if (attachment) candidates.push(new URL(attachment.replace(/&amp;/g, "&"), fullUrl).href);
+            const pdfAttachment = text.match(/href="([^"]*(?:\/source|\.pdf)[^"]*)"/i)?.[1];
+            if (pdfAttachment) candidates.push(new URL(pdfAttachment.replace(/&amp;/g, "&"), fullUrl).href);
+            const sourcePdfUrl = new URL(fullUrl);
+            sourcePdfUrl.pathname = `${sourcePdfUrl.pathname.replace(/\/$/, "")}/source.pdf`;
+            candidates.push(sourcePdfUrl.href);
+
             for (const candidate of candidates) {
               try {
                 const source = await fetchDocument(candidate);
@@ -513,7 +552,17 @@ export class KenyaLawClient {
                     sectionsCount: Math.max(1, body.split("\n\n").length) };
                   break;
                 }
-                const sourceParsed = parseAknXml(new TextDecoder().decode(sourceBytes), aknUri);
+                const sourceText = new TextDecoder().decode(sourceBytes);
+                if (sourceText.startsWith("%PDF-") || source.headers.get("content-type")?.includes("application/pdf")) {
+                  const pdfText = await extractPdfText(sourceBytes);
+                  if (pdfText && pdfText.length > 50) {
+                    parsed = { ...parsed, docType: documentUrl.pathname.includes("/judgment/") ? "judgment" : "act",
+                      markdown: `# ${parsed.title}\n\n**AKN URI**: ${aknUri}\n\n---\n\n${pdfText}`,
+                      sectionsCount: Math.max(1, pdfText.split("\n\n").length) };
+                    break;
+                  }
+                }
+                const sourceParsed = parseAknXml(sourceText, aknUri);
                 if (sourceParsed.docType !== "unknown") {
                   parsed = sourceParsed;
                   break;
