@@ -298,6 +298,19 @@ describe("Synchronized retrieval regressions", () => {
     }]);
   });
 
+  test.each([
+    ["<b>Fixture parties</b>", "Fixture parties"],
+    ["Fixture parties <script", "Fixture parties script"],
+    ["Fixture parties <scr<script>ipt>", "Fixture parties ipt"],
+  ])("cause-list cells remove markup and residual HTML delimiters: %s", async (source, parties) => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async () => new Response(`<tr><td>Fixture sanitization</td><td>${source}</td><td></td><td></td><td>14:30</td></tr>`));
+    expect(await KenyaLawClient.getCauseList(`Fixture sanitization ${parties}`)).toEqual([{
+      court_station: `Fixture sanitization ${parties}`, cause_number: "Fixture sanitization", parties,
+      presiding_judge_coram: undefined, hearing_type: undefined, time: "14:30",
+      source_url: `https://new.kenyalaw.org/causelists/?q=${encodeURIComponent(`Fixture sanitization ${parties}`)}`,
+    }]);
+  });
+
   test("search and feed redirects cannot escape the official hosts", async () => {
     const urls: string[] = [];
     network = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {

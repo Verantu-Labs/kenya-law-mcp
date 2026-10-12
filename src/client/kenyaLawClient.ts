@@ -1219,7 +1219,12 @@ export class KenyaLawClient {
     while ((match = rowRegex.exec(html)) !== null && entries.length < 20) {
       if (!match[1]) continue;
       // Keep empty cells in place so missing coram/type values do not shift the time column.
-      const cells = Array.from(match[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi), cell => cell[1]!.replace(/<[^>]+>/g, "").trim());
+      // Complete tags are removed for text extraction; malformed fragments must
+      // not leave raw HTML delimiters in the extracted cell values.
+      const cells = Array.from(
+        match[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi),
+        cell => cell[1]!.replace(/<[^>]+>/g, "").replace(/[<>]/g, "").trim()
+      );
       if (cells[0] && cells[1]) {
         entries.push({
           court_station: courtStation,
