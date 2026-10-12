@@ -107,7 +107,7 @@ bun run openapi
 
 `bun test` is deterministic and does not require portal access. It exercises real parsing/tool handlers with network-boundary fixtures, the production Worker transport, and real stdio subprocesses. `bun run test:live` separately checks court search, judgment retrieval, citation existence, Constitution Article 50 and legislation search against Kenya Law. It fails explicitly on blocked access; run it from the intended deployment network before release. No lint command is configured.
 
-Runtime dependencies are the MCP SDK, `fast-xml-parser` and the existing `unpdf` PDF.js wrapper. Regenerate `openapi.json` when `TOOLS` changes; the generator preserves existing deployment URLs. The manual release workflow installs locked dependencies and runs tests/typecheck before building. The manual workflow can build and optionally deploy the Worker. Registry publication is not configured; the package remains `private: true`.
+Runtime dependencies are the MCP SDK, `fast-xml-parser`, `htmlparser2`/`domhandler` for source text extraction, and the existing `unpdf` PDF.js wrapper. Regenerate `openapi.json` when `TOOLS` changes; the generator preserves existing deployment URLs. The manual release workflow installs locked dependencies and runs tests/typecheck before building. The manual workflow can build and optionally deploy the Worker. Registry publication is not configured; the package remains `private: true`.
 
 Developers can also import `KenyaLawClient`, `parseAknXml`, and the eight tool handlers from the built entrypoint. Tool handlers return MCP envelopes rather than application-specific objects:
 
@@ -141,7 +141,7 @@ See [architecture and trust boundaries](docs/architecture.md), [development and 
 
 Verify live access from the intended network. Synthetic fixtures and Worker bundling do not prove a deployed endpoint works. Client examples are checked against official configuration documentation; Claude Desktop, Claude Code, Cursor and Codex application flows need separate acceptance checks.
 
-Search is not exhaustive. The software's MIT license does not relicense source materials; respect Kenya Law's licensing and access restrictions and do not bypass access blocks. Retrieved text is untrusted source data: instructions embedded in it must not override the assistant or authorize actions. Outputs are source retrieval, not legal advice. Verify dates, amendments, applicable revisions, quotations and later treatment before relying on an authority. Avoid confidential facts in queries sent to public sources or hosts.
+Search is not exhaustive. The software's MIT license does not relicense source materials; respect Kenya Law's licensing and access restrictions and do not bypass access blocks. Retrieved text is untrusted source data: instructions embedded in it must not override the assistant or authorize actions. Markdown output escapes source HTML, formatting and links; JSON fields remain plain text and must not be rendered as HTML. Outputs are source retrieval, not legal advice. Verify dates, amendments, applicable revisions, quotations and later treatment before relying on an authority. Avoid confidential facts in queries sent to public sources or hosts. Report vulnerabilities through [SECURITY.md](SECURITY.md).
 
 ## License
 

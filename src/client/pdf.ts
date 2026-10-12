@@ -1,4 +1,5 @@
 import { getDocumentProxy } from "unpdf";
+import { escapeMarkdownText } from "../parsing/text.js";
 
 export async function extractPdfDocument(bytes: Uint8Array): Promise<{ markdown: string; pageCount: number }> {
   // Parse bytes only: do not execute PDF actions or resolve document-supplied URLs.
@@ -16,7 +17,7 @@ export async function extractPdfDocument(bytes: Uint8Array): Promise<{ markdown:
     }
     if (!pages.some(text => text.trim())) throw new Error("PDF has no readable text layer; OCR is required.");
     return {
-      markdown: pages.map((text, index) => `### Page ${index + 1}\n\n${text || "[No readable text on this page; OCR is required.]"}`).join("\n\n"),
+      markdown: pages.map((text, index) => `### Page ${index + 1}\n\n${text ? escapeMarkdownText(text) : "[No readable text on this page; OCR is required.]"}`).join("\n\n"),
       pageCount: document.numPages,
     };
   } finally {

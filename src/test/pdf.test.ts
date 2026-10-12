@@ -66,7 +66,7 @@ describe("PDF document retrieval", () => {
     const doc = await KenyaLawClient.getAknDocument(uri);
     expect({ title: doc.title, pageCount: doc.pageCount, sectionsCount: doc.sectionsCount, markdown: doc.markdown }).toEqual({
       title: "Fixture [2022] KESC 900001", pageCount: 1, sectionsCount: 0,
-      markdown: `# Fixture [2022] KESC 900001\n\n**AKN URI**: ${uri}\n\n### Page 1\n\nReadable synthetic source.`,
+      markdown: `# Fixture \\[2022\\] KESC 900001\n\n**AKN URI**: ${uri}\n\n### Page 1\n\nReadable synthetic source.`,
     });
     expect(urls).toEqual([`https://new.kenyalaw.org${uri}`, `https://new.kenyalaw.org${uri}/eng@2022-01-01`, `https://new.kenyalaw.org${uri}/eng@2022-01-01/source`]);
   });
@@ -82,6 +82,12 @@ describe("PDF document retrieval", () => {
     const retry = await getAknDocument({ akn_url: uri });
     expect(retry.isError).toBeUndefined();
     expect(retry.content[0].text).toContain("Readable retry.");
+  });
+
+  test("PDF text cannot inject raw HTML or Markdown links", async () => {
+    network = spyOn(globalThis, "fetch").mockResolvedValue(new Response(buildPdf(['Literal <img src=x> [click](javascript:alert(1))']), { headers: { "content-type": "application/pdf" } }));
+    const doc = await KenyaLawClient.getAknDocument("/akn/ke/bill/test/pdf-text-security");
+    expect(doc.markdown).toContain("Literal &lt;img src=x&gt; \\[click\\](javascript\\:alert(1))");
   });
 
   test("a large viewer shell cannot become a readable authority when its source fails", async () => {

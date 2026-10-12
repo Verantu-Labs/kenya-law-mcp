@@ -5,6 +5,8 @@
  */
 
 import { parseAknXml, type ParsedAknDocument } from "../akn/parser.js";
+import { parseDocument, DomUtils } from "htmlparser2";
+import { escapeMarkdownText, htmlElements, htmlToText, markdownDestination, nodeToText } from "../parsing/text.js";
 
 const BASE_URL = "https://kenyalaw.org";
 const NEW_BASE_URL = "https://new.kenyalaw.org";
@@ -298,7 +300,7 @@ export async function resolveCourtStation(station: string | undefined, courtCode
     let match: RegExpExecArray | null;
     while ((match = stationPattern.exec(html)) !== null) {
       if (!match[1] || !match[2]) continue;
-      const name = match[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      const name = htmlToText(match[2]).replace(/\s+/g, " ").trim();
       if (name) stations.push({ code: match[1].toUpperCase(), name });
     }
     cacheResult(queryCache, cacheKey, { timestamp: now, data: stations });
@@ -443,19 +445,7 @@ async function extractWordDocumentXml(bytes: Uint8Array): Promise<string | null>
 }
 
 function docxXmlToMarkdown(xml: string): string {
-  return xml
-    .replace(/<w:p[^>]*>/gi, "\n\n")
-    .replace(/<w:br[^>]*>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n\s+/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return escapeMarkdownText(htmlToText(xml, { xmlMode: true }));
 }
 
 export class KenyaLawClient {
@@ -492,7 +482,7 @@ export class KenyaLawClient {
         cases.forEach((c, idx) => {
           const dateMatch = c.case_title.match(/\((\d{1,2}\s+[A-Za-z]+\s+\d{4})\)/);
           const dateStr = dateMatch ? dateMatch[1] : `${year}`;
-          markdown += `| ${idx + 1} | ${c.case_title} | \`${c.neutral_citation || "N/A"}\` | ${dateStr} | [${c.akn_url}](${c.url}) |\n`;
+          markdown += `| ${idx + 1} | ${escapeMarkdownText(c.case_title)} | ${escapeMarkdownText(c.neutral_citation || "N/A")} | ${escapeMarkdownText(dateStr)} | [${escapeMarkdownText(c.akn_url)}](${markdownDestination(c.url)}) |\n`;
         });
 
         const parsed: ParsedAknDocument = {
@@ -541,7 +531,7 @@ export class KenyaLawClient {
           const pdf = await extractPdfDocument(bytes);
           // Readable text is not verified citation metadata. Keep a bare PDF unclassified.
           parsed = { title: `Document ${aknUri}`, docType: "unknown", aknUrl: aknUri,
-            markdown: `# Document ${aknUri}\n\n**AKN URI**: ${aknUri}\n\n${pdf.markdown}`,
+            markdown: `# Document ${escapeMarkdownText(aknUri)}\n\n**AKN URI**: ${escapeMarkdownText(aknUri)}\n\n${pdf.markdown}`,
             sectionsCount: 0, pageCount: pdf.pageCount };
         } else if (bytes.length > 4 && new DataView(bytes.buffer).getUint32(0, true) === 0x04034b50) {
           const xml = await extractWordDocumentXml(bytes);
@@ -551,7 +541,7 @@ export class KenyaLawClient {
             title: `Document ${aknUri}`,
             docType: documentUrl.pathname.includes("/judgment/") ? "judgment" : "act",
             aknUrl: aknUri,
-            markdown: `# Document ${aknUri}\n\n---\n\n${body}`,
+            markdown: `# Document ${escapeMarkdownText(aknUri)}\n\n---\n\n${body}`,
             sectionsCount: Math.max(1, body.split("\n\n").length),
           };
         } else {
@@ -579,7 +569,7 @@ export class KenyaLawClient {
                   || source.headers.get("content-type")?.includes("application/pdf")) {
                   const { extractPdfDocument } = await import("./pdf.js");
                   const pdf = await extractPdfDocument(sourceBytes);
-                  parsed = { ...parsed, markdown: `# ${parsed.title}\n\n**AKN URI**: ${aknUri}\n\n${pdf.markdown}`,
+                  parsed = { ...parsed, markdown: `# ${escapeMarkdownText(parsed.title)}\n\n**AKN URI**: ${escapeMarkdownText(aknUri)}\n\n${pdf.markdown}`,
                     sectionsCount: 0, pageCount: pdf.pageCount };
                   break;
                 }
@@ -588,7 +578,7 @@ export class KenyaLawClient {
                   const body = xml ? docxXmlToMarkdown(xml) : "";
                   if (!body.trim()) continue;
                   parsed = { ...parsed, docType: documentUrl.pathname.includes("/judgment/") ? "judgment" : "act",
-                    markdown: `# ${parsed.title}\n\n**AKN URI**: ${aknUri}\n\n---\n\n${body}`,
+                    markdown: `# ${escapeMarkdownText(parsed.title)}\n\n**AKN URI**: ${escapeMarkdownText(aknUri)}\n\n---\n\n${body}`,
                     sectionsCount: Math.max(1, body.split("\n\n").length) };
                   break;
                 }
@@ -735,7 +725,7 @@ export class KenyaLawClient {
       while ((match = linkRegex.exec(pageHtml)) !== null) {
         if (!match[1] || !match[2]) continue;
         const aknPath = match[1].trim();
-        const rawTitle = match[2].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+        const rawTitle = htmlToText(match[2]).replace(/\s+/g, " ").trim();
 
         if (
           !rawTitle ||
@@ -837,7 +827,7 @@ export class KenyaLawClient {
       const linkMatch = block.match(/<link[^>]*href=["']([^"']+)["']/i);
 
       if (titleMatch?.[1] && linkMatch?.[1]) {
-        const rawTitle = titleMatch[1].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+        const rawTitle = htmlToText(titleMatch[1]).replace(/\s+/g, " ").trim();
         const rawUrl = linkMatch[1].trim();
 
         if (qLower === "" || rawTitle.toLowerCase().includes(qLower) || rawUrl.toLowerCase().includes(qLower)) {
@@ -893,7 +883,7 @@ export class KenyaLawClient {
         if (!match[1] || !match[2]) continue;
         const rawLink = match[1].trim();
         const aknPath = rawLink.startsWith("http") ? new URL(rawLink).pathname : rawLink;
-        const rawTitle = match[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        const rawTitle = htmlToText(match[2]).replace(/\s+/g, " ").trim();
 
         if (!rawTitle || rawTitle.toLowerCase().includes("next") || rawTitle.toLowerCase().includes("previous") || rawTitle.toLowerCase() === "search" || rawTitle.toLowerCase() === "home") {
           continue;
@@ -1130,7 +1120,7 @@ export class KenyaLawClient {
       while ((match = linkRegex.exec(html)) !== null && results.length < limit) {
         if (!match[1] || !match[2]) continue;
         const aknPath = match[1].trim();
-        const rawTitle = match[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        const rawTitle = htmlToText(match[2]).replace(/\s+/g, " ").trim();
 
         if (!rawTitle || rawTitle.toLowerCase() === "laws of kenya" || rawTitle.toLowerCase().includes("constitution of kenya")) {
           if (rawTitle.toLowerCase().includes("constitution of kenya") && !actName.toLowerCase().includes("constitution")) {
@@ -1213,18 +1203,12 @@ export class KenyaLawClient {
     const html = new TextDecoder().decode(await readResponseBytes(response));
     const entries: CauseListEntry[] = [];
 
-    const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-    let match: RegExpExecArray | null;
-
-    while ((match = rowRegex.exec(html)) !== null && entries.length < 20) {
-      if (!match[1]) continue;
+    const document = parseDocument(html);
+    for (const row of htmlElements(document, { excludeNonContent: true })) {
+      if (entries.length >= 20) break;
+      if (row.name !== "tr") continue;
       // Keep empty cells in place so missing coram/type values do not shift the time column.
-      // Complete tags are removed for text extraction; malformed fragments must
-      // not leave raw HTML delimiters in the extracted cell values.
-      const cells = Array.from(
-        match[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi),
-        cell => cell[1]!.replace(/<[^>]+>/g, "").replace(/[<>]/g, "").trim()
-      );
+      const cells = DomUtils.getElementsByTagName("td", row.children, false).map(cell => nodeToText(cell).replace(/\s+/g, " ").trim());
       if (cells[0] && cells[1]) {
         entries.push({
           court_station: courtStation,
@@ -1311,7 +1295,7 @@ export class KenyaLawClient {
     while ((match = linkRegex.exec(html)) !== null && results.length < limit) {
       if (!match[1] || !match[2]) continue;
       const url = match[1];
-      const rawTitle = match[2].replace(/<[^>]+>/g, "").trim();
+      const rawTitle = htmlToText(match[2]).trim();
       if (rawTitle && rawTitle.length > 5) {
         results.push({
           title: rawTitle,

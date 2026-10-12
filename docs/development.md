@@ -23,6 +23,8 @@ bunx --no-install wrangler deploy --dry-run
 
 The live script checks court discovery, judgment text, existence verification, Constitution Article 50 and legislation. It stops at the first failure; later checks are not verified in that run. A 403 is a failed access check. Worker dry-run bundles without deploying and does not establish live PDF extraction on Cloudflare.
 
+Source-text security tests use `marked` as a development-only Markdown renderer and inspect its HTML result. They check that literal source text remains visible without active HTML, injected links/images or repeated entity decoding. The same suite exercises real AKN, HTML, DOCX and PDF extraction, cause-list resources, section headers, malformed markup and deep HTML traversal. These checks do not certify every client renderer or replace CodeQL analysis.
+
 No linter or formatter is configured. `git diff --check` checks whitespace, not lint or full formatting; report that gap rather than labelling typecheck as lint. Review the complete diff. See [client and Inspector checks](../guide.md). Diagnostic logging belongs on stderr because stdout carries stdio JSON-RPC; avoid query/document logs. Distinguish unreadable sources, missing matches and upstream failures.
 
 ## Modifying tools

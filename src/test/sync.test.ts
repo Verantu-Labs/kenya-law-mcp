@@ -57,7 +57,7 @@ describe("Synchronized retrieval regressions", () => {
     const requests: Array<{ url: string; redirect?: RequestRedirect; timeout: boolean }> = [];
     network = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       requests.push({ url: String(input), redirect: init?.redirect, timeout: init?.signal instanceof AbortSignal });
-      return String(input).includes("new.kenyalaw.org")
+      return new URL(String(input)).hostname === "new.kenyalaw.org"
         ? new Response("blocked", { status: 403 })
         : new Response('<akomaNtoso><act><meta><identification><FRBRWork><FRBRname value="Fixture Act"/></FRBRWork></identification></meta><body><section><num>1.</num><heading>Scope</heading><content><p>Fixture provision.</p></content></section></body></act></akomaNtoso>');
     });
@@ -84,7 +84,7 @@ describe("Synchronized retrieval regressions", () => {
     zip.set(body, 30 + name.length);
     network = spyOn(globalThis, "fetch").mockResolvedValue(new Response(zip));
     const result = await getAknDocument({ akn_url: `/akn/ke/judgment/kehc/2018/90${method}/source` });
-    expect(result.content[0].text).toContain("Fixture judgment & reasons.");
+    expect(result.content[0].text).toContain("Fixture judgment &amp; reasons.");
   });
 
   test("blocked searches and document reads become MCP errors", async () => {
@@ -174,7 +174,7 @@ describe("Synchronized retrieval regressions", () => {
       return new Response(null, { status: 302, headers: { Location: "http://127.0.0.1/private" } });
     });
     expect((await getAknDocument({ akn_url: "/akn/ke/act/2020/redirect" })).isError).toBe(true);
-    expect(urls.every(url => new URL(url).hostname.endsWith("kenyalaw.org"))).toBe(true);
+    expect(urls.every(url => ["kenyalaw.org", "new.kenyalaw.org"].includes(new URL(url).hostname))).toBe(true);
   });
 
   test("follows a canonical official redirect", async () => {
@@ -300,9 +300,9 @@ describe("Synchronized retrieval regressions", () => {
 
   test.each([
     ["<b>Fixture parties</b>", "Fixture parties"],
-    ["Fixture parties <script", "Fixture parties script"],
-    ["Fixture parties <scr<script>ipt>", "Fixture parties ipt"],
-  ])("cause-list cells remove markup and residual HTML delimiters: %s", async (source, parties) => {
+    ["Fixture parties <script", "Fixture parties"],
+    ["Fixture parties <scr<script>ipt>", "Fixture parties ipt>"],
+  ])("cause-list cells extract source text without interpreting markup: %s", async (source, parties) => {
     network = spyOn(globalThis, "fetch").mockImplementation(async () => new Response(`<tr><td>Fixture sanitization</td><td>${source}</td><td></td><td></td><td>14:30</td></tr>`));
     expect(await KenyaLawClient.getCauseList(`Fixture sanitization ${parties}`)).toEqual([{
       court_station: `Fixture sanitization ${parties}`, cause_number: "Fixture sanitization", parties,
@@ -333,6 +333,8 @@ describe("Synchronized retrieval regressions", () => {
     expect(result.content[0].text).toContain("20 MiB");
   });
 
+  // This deliberately parses and serializes over 20 MiB of real fixture text;
+  // it verifies eviction, not a hardware-dependent five-second latency target.
   test("document caches evict by bytes as well as entry count", async () => {
     const urls: string[] = [];
     network = spyOn(globalThis, "fetch").mockImplementation(async input => {
@@ -344,7 +346,7 @@ describe("Synchronized retrieval regressions", () => {
     expect(urls.length).toBe(8);
     await KenyaLawClient.getAknDocument("/akn/ke/act/2020/byte-cache-0/source");
     expect(urls.length).toBe(9);
-  });
+  }, 20000);
 
   test("document caches evict old entries and expire reads", async () => {
     const urls: string[] = [];

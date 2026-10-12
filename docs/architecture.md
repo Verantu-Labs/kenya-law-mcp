@@ -34,6 +34,12 @@ Results use `content` and optionally `isError`. Some text blocks contain JSON; d
 
 Bare PDFs can be readable with `docType: "unknown"` and `pageCount`; readability does not certify identity. Viewer sources can retain available official-page metadata. No title, citation or legal status is inferred solely from a PDF text layer. Provision extraction is heuristic and fails when the requested boundary cannot be located.
 
+## Source text and rendering
+
+[`parsing/text.ts`](../src/parsing/text.ts) extracts HTML/DOCX text with `htmlparser2`, decodes entities once, excludes active/site elements and walks nodes iteratively. HTML fallback and cause-list cells use parsed elements rather than regex tag removal. Discovery titles remain plain text in JSON. JSON strings must be displayed as text by consumers, not assigned to HTML sinks.
+
+Markdown output escapes literal HTML delimiters, source formatting, links/images and GFM autolinks. AKN XML text/metadata, HTML, DOCX, PDF, directory tables, section headers and cause-list resources share this boundary. Literal comparisons and citation brackets remain visible when rendered. Only server-generated official source links are active, with delimiter-safe destinations. This is text extraction and output escaping, not a general-purpose HTML sanitizer or a guarantee about every client's renderer. Retrieved text can still contain misleading instructions; client execution policies remain necessary.
+
 ## Privacy and storage
 
 Document/query maps each retain at most 100 entries for one hour. Writes drop expired entries and evict the oldest insertion at capacity; reads do not promote entries. This is not an LRU policy. Each map also caps serialized data at 16 MiB, evicting older entries or skipping an oversized entry. There is no disk storage or durable cache.
