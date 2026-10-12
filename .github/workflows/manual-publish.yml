@@ -1,12 +1,8 @@
-name: Manual Package & Deploy
+name: Manual Build & Deploy
 
 on:
   workflow_dispatch:
     inputs:
-      publish_npm:
-        description: 'Publish package to GitHub Packages / NPM'
-        type: boolean
-        default: false
       deploy_cloudflare:
         description: 'Deploy to Cloudflare Workers'
         type: boolean
@@ -35,14 +31,6 @@ jobs:
 
       - name: Build Output
         run: bun run build
-
-      - name: Publish to GitHub Packages (NPM Registry)
-        if: ${{ inputs.publish_npm }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          npm config set //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
-          npm publish --registry=https://npm.pkg.github.com
 
       - name: Deploy to Cloudflare Workers
         if: ${{ inputs.deploy_cloudflare }}

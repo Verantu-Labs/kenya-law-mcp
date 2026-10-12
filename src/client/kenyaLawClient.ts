@@ -1,5 +1,5 @@
 /**
- * client/kenyaLawClient.ts - High-performance stateless HTTP client for Kenya Law (kenyalaw.org).
+ * client/kenyaLawClient.ts - HTTP retrieval client for Kenya Law (kenyalaw.org).
  * Resolves Akoma Ntoso (AKN) URIs, search queries, daily cause lists, and citator metadata.
  * Uses process-local one-hour caches and bounded network request timeouts.
  */
@@ -13,6 +13,7 @@ const CACHE_TTL_MS = 60 * 60 * 1000; // 1-hour TTL
 interface CacheEntry<T> {
   timestamp: number;
   data: T;
+  bytes?: number;
 }
 
 const documentCache = new Map<string, CacheEntry<ParsedAknDocument>>();
@@ -23,16 +24,26 @@ function cacheResult<T>(cache: Map<string, CacheEntry<T>>, key: string, entry: C
     if (Date.now() - value.timestamp >= CACHE_TTL_MS) cache.delete(cachedKey);
   }
   cache.delete(key);
-  if (cache.size >= 100) cache.delete(cache.keys().next().value!);
-  cache.set(key, entry);
+  const bytes = new TextEncoder().encode(JSON.stringify(entry.data)).byteLength;
+  // Count alone permits a few large documents to exhaust an isolate. Skip
+  // oversized entries and bound each process-local cache to 16 MiB of data.
+  if (bytes > 16 * 1024 * 1024) return;
+  let totalBytes = bytes;
+  for (const value of cache.values()) totalBytes += value.bytes ?? 0;
+  while (cache.size >= 100 || totalBytes > 16 * 1024 * 1024) {
+    const oldest = cache.keys().next().value!;
+    totalBytes -= cache.get(oldest)?.bytes ?? 0;
+    cache.delete(oldest);
+  }
+  cache.set(key, { ...entry, bytes });
 }
 
-async function readDocumentBytes(response: Response): Promise<Uint8Array> {
+async function readResponseBytes(response: Response): Promise<Uint8Array> {
   // Check streamed bytes too: Content-Length can be missing or describe compressed data.
   const maxBytes = 20 * 1024 * 1024;
   if (Number(response.headers.get("content-length")) > maxBytes) {
     await response.body?.cancel();
-    throw new Error("Document exceeds the 20 MiB download limit.");
+    throw new Error("Kenya Law response exceeds the 20 MiB download limit.");
   }
   if (!response.body) throw new Error("Document response has no readable body.");
   const reader = response.body.getReader();
@@ -45,7 +56,7 @@ async function readDocumentBytes(response: Response): Promise<Uint8Array> {
       length += value.byteLength;
       if (length > maxBytes) {
         await reader.cancel();
-        throw new Error("Document exceeds the 20 MiB download limit.");
+        throw new Error("Kenya Law response exceeds the 20 MiB download limit.");
       }
       chunks.push(value);
     }
@@ -88,18 +99,29 @@ export function normalizeDocumentUrl(value: string): URL {
   return url;
 }
 
-async function fetchDocument(url: string): Promise<Response> {
-  let target = normalizeDocumentUrl(url);
+function normalizeOfficialUrl(value: string): URL {
+  const url = new URL(value);
+  if (url.protocol !== "https:" || !["kenyalaw.org", "new.kenyalaw.org"].includes(url.hostname)
+    || url.port || url.username || url.password) {
+    throw new Error("Requests must stay on the official Kenya Law HTTPS hosts.");
+  }
+  return url;
+}
+
+async function fetchKenyaLaw(url: string, init: RequestInit = {}, normalizeUrl = normalizeOfficialUrl): Promise<Response> {
+  let target = normalizeUrl(url);
+  // One deadline spans redirects and body consumption, rather than resetting
+  // the timeout for every redirect in a potentially slow chain.
+  const signal = init.signal ?? AbortSignal.timeout(15000);
   for (let redirects = 0; redirects <= 5; redirects++) {
     const response = await fetch(target.href, {
-      headers: BROWSER_HEADERS,
-      redirect: "manual",
-      signal: AbortSignal.timeout(15000),
+      ...init, headers: init.headers ?? BROWSER_HEADERS, redirect: "manual", signal,
     });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     const location = response.headers.get("location");
+    await response.body?.cancel();
     if (!location) throw new Error("Kenya Law redirect has no Location header.");
-    target = normalizeDocumentUrl(new URL(location, target).href);
+    target = normalizeUrl(new URL(location, target).href);
   }
   throw new Error("Too many Kenya Law redirects.");
 }
@@ -247,14 +269,14 @@ export async function resolveCourtStation(station: string | undefined, courtCode
     : undefined;
 
   if (!stations) {
-    let response = await fetch(`${NEW_BASE_URL}/judgments/${code}/`, {
+    let response = await fetchKenyaLaw(`${NEW_BASE_URL}/judgments/${code}/`, {
       headers: BROWSER_HEADERS,
       redirect: "follow",
       signal: AbortSignal.timeout(10000),
     }).catch(() => null);
 
     if (!response || !response.ok) {
-      const altResponse = await fetch(`${BASE_URL}/judgments/${code}/`, {
+      const altResponse = await fetchKenyaLaw(`${BASE_URL}/judgments/${code}/`, {
         headers: BROWSER_HEADERS,
         redirect: "follow",
         signal: AbortSignal.timeout(10000),
@@ -270,7 +292,7 @@ export async function resolveCourtStation(station: string | undefined, courtCode
       throw new KenyaLawAccessBlockedError(`Kenya Law court directory access blocked (HTTP 403 Forbidden) for ${code}`);
     }
     if (!response || !response.ok) throw new Error(`Kenya Law station discovery failed: ${response ? `HTTP ${response.status}` : "network unavailable"}`);
-    const html = await response.text();
+    const html = new TextDecoder().decode(await readResponseBytes(response));
     const stationPattern = new RegExp(`<a[^>]+href=["']/judgments/${code}/([^/"']+)/["'][^>]*>([\\s\\S]*?)<\\/a>`, "gi");
     stations = [];
     let match: RegExpExecArray | null;
@@ -405,7 +427,7 @@ async function extractWordDocumentXml(bytes: Uint8Array): Promise<string | null>
       if (compMethod === 8) {
         try {
           const stream = new Blob([new Uint8Array(slice)]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-          return decoder.decode(await readDocumentBytes(new Response(stream)));
+          return decoder.decode(await readResponseBytes(new Response(stream)));
         } catch {
           return null;
         }
@@ -508,10 +530,10 @@ export class KenyaLawClient {
     let failure: unknown = new Error("No readable Kenya Law document was returned.");
     for (const fullUrl of [primaryUrl, alternate.href]) {
       try {
-        const response = await fetchDocument(fullUrl);
+        const response = await fetchKenyaLaw(fullUrl, {}, normalizeDocumentUrl);
         if (response.status === 403) throw new KenyaLawAccessBlockedError();
         if (!response.ok) throw new Error(`HTTP ${response.status} when fetching Kenya Law document.`);
-        const bytes = await readDocumentBytes(response);
+        const bytes = await readResponseBytes(response);
         const text = new TextDecoder().decode(bytes);
         let parsed: ParsedAknDocument;
         if (text.startsWith("%PDF-") || response.headers.get("content-type")?.includes("application/pdf")) {
@@ -550,9 +572,9 @@ export class KenyaLawClient {
             candidates.push(sourceUrl.href);
             for (const candidate of new Set(candidates)) {
               try {
-                const source = await fetchDocument(candidate);
+                const source = await fetchKenyaLaw(candidate, {}, normalizeDocumentUrl);
                 if (!source.ok) continue;
-                const sourceBytes = await readDocumentBytes(source);
+                const sourceBytes = await readResponseBytes(source);
                 if (new TextDecoder().decode(sourceBytes.subarray(0, 5)) === "%PDF-"
                   || source.headers.get("content-type")?.includes("application/pdf")) {
                   const { extractPdfDocument } = await import("./pdf.js");
@@ -609,14 +631,14 @@ export class KenyaLawClient {
       return cached.data;
     }
 
-    let res = await fetch(`https://kenyalaw.org/judgments/${code}/`, {
+    let res = await fetchKenyaLaw(`https://kenyalaw.org/judgments/${code}/`, {
       headers: BROWSER_HEADERS,
       redirect: "follow",
       signal: AbortSignal.timeout(8000),
     }).catch(() => null);
 
     if (!res || !res.ok) {
-      const altRes = await fetch(`${NEW_BASE_URL}/judgments/${code}/`, {
+      const altRes = await fetchKenyaLaw(`${NEW_BASE_URL}/judgments/${code}/`, {
         headers: BROWSER_HEADERS,
         redirect: "follow",
         signal: AbortSignal.timeout(8000),
@@ -633,7 +655,7 @@ export class KenyaLawClient {
     }
     if (!res || !res.ok) throw new Error(`Kenya Law request failed: ${res ? `HTTP ${res.status}` : "network unavailable"}`);
 
-    const html = await res.text();
+    const html = new TextDecoder().decode(await readResponseBytes(res));
     const yearMatches = [...html.matchAll(new RegExp(`/judgments/${code}/(\\d{4})/`, "gi"))];
     const years = Array.from(
       new Set(
@@ -674,7 +696,7 @@ export class KenyaLawClient {
     let blockedCount = 0;
     const fetchPage = async (pageUrl: string) => {
       try {
-        const res = await fetch(pageUrl, {
+        const res = await fetchKenyaLaw(pageUrl, {
           headers: BROWSER_HEADERS,
           redirect: "follow",
           signal: AbortSignal.timeout(10000),
@@ -684,7 +706,7 @@ export class KenyaLawClient {
           return null;
         }
         if (!res.ok) return null;
-        return await res.text();
+        return new TextDecoder().decode(await readResponseBytes(res));
       } catch {
         return null;
       }
@@ -779,13 +801,13 @@ export class KenyaLawClient {
    */
   private static async searchAtomFeedFallback(feedType: "judgments" | "all", query: string, limit: number = 10): Promise<Array<{ title: string; url: string; aknPath: string }>> {
     const feedUrl = `${NEW_BASE_URL}/feeds/${feedType}.xml`;
-    let response = await fetch(feedUrl, {
+    let response = await fetchKenyaLaw(feedUrl, {
       headers: BROWSER_HEADERS,
       signal: AbortSignal.timeout(8000),
     }).catch(() => null);
 
     if (!response || !response.ok) {
-      const altResponse = await fetch(`${BASE_URL}/feeds/${feedType}.xml`, {
+      const altResponse = await fetchKenyaLaw(`${BASE_URL}/feeds/${feedType}.xml`, {
         headers: BROWSER_HEADERS,
         signal: AbortSignal.timeout(8000),
       }).catch(() => null);
@@ -803,7 +825,7 @@ export class KenyaLawClient {
       throw new Error(`Kenya Law feed failed: ${response ? `HTTP ${response.status}` : "network unavailable"}`);
     }
 
-    const xml = await response.text();
+    const xml = new TextDecoder().decode(await readResponseBytes(response));
     const results: Array<{ title: string; url: string; aknPath: string }> = [];
     const entryBlocks = xml.split("<entry>").slice(1);
     const qLower = query.toLowerCase();
@@ -968,7 +990,7 @@ export class KenyaLawClient {
     if (court) unifiedUrl += `&court=${encodeURIComponent(court)}`;
     if (yearFrom) unifiedUrl += `&year=${yearFrom}`;
 
-    let res = await fetch(unifiedUrl, {
+    let res = await fetchKenyaLaw(unifiedUrl, {
       headers: BROWSER_HEADERS,
       redirect: "follow",
       signal: AbortSignal.timeout(8000),
@@ -977,7 +999,7 @@ export class KenyaLawClient {
     if (res && res.status === 403) {
       encountered403 = true;
     } else if (res && res.ok) {
-      const html = await res.text();
+      const html = new TextDecoder().decode(await readResponseBytes(res));
       parseHtmlResults(html, courtInfo ? courtInfo.code : undefined, true);
     } else {
       upstreamFailure = new Error(`Kenya Law search failed: ${res ? `HTTP ${res.status}` : "network unavailable"}`);
@@ -989,7 +1011,7 @@ export class KenyaLawClient {
       if (court) genUrl += `&court=${encodeURIComponent(court)}`;
       if (yearFrom) genUrl += `&year=${yearFrom}`;
 
-      res = await fetch(genUrl, {
+      res = await fetchKenyaLaw(genUrl, {
         headers: BROWSER_HEADERS,
         redirect: "follow",
         signal: AbortSignal.timeout(8000),
@@ -998,7 +1020,7 @@ export class KenyaLawClient {
       if (res && res.status === 403) {
         encountered403 = true;
       } else if (res && res.ok) {
-        const html = await res.text();
+        const html = new TextDecoder().decode(await readResponseBytes(res));
         parseHtmlResults(html, courtInfo ? courtInfo.code : undefined, true);
       } else {
         upstreamFailure = new Error(`Kenya Law search failed: ${res ? `HTTP ${res.status}` : "network unavailable"}`);
@@ -1086,7 +1108,7 @@ export class KenyaLawClient {
 
     let encountered403 = false;
     let upstreamFailure: Error | undefined;
-    const response = await fetch(searchUrl, {
+    const response = await fetchKenyaLaw(searchUrl, {
       headers: BROWSER_HEADERS,
       signal: AbortSignal.timeout(8000),
     }).catch(() => null);
@@ -1101,7 +1123,7 @@ export class KenyaLawClient {
     const results: StatuteSearchResult[] = [];
 
     if (response && response.ok) {
-      const html = await response.text();
+      const html = new TextDecoder().decode(await readResponseBytes(response));
       const linkRegex = /<a\s+[^>]*href=["'](\/akn\/ke\/act\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
       let match: RegExpExecArray | null;
 
@@ -1178,7 +1200,7 @@ export class KenyaLawClient {
     const encodedStation = encodeURIComponent(courtStation);
     const causeUrl = `${NEW_BASE_URL}/causelists/?q=${encodedStation}`;
 
-    const response = await fetch(causeUrl, {
+    const response = await fetchKenyaLaw(causeUrl, {
       headers: BROWSER_HEADERS,
       signal: AbortSignal.timeout(6000),
     });
@@ -1188,7 +1210,7 @@ export class KenyaLawClient {
     }
     if (!response.ok) throw new Error(`Kenya Law request failed: HTTP ${response.status}`);
 
-    const html = await response.text();
+    const html = new TextDecoder().decode(await readResponseBytes(response));
     const entries: CauseListEntry[] = [];
 
     const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
@@ -1265,7 +1287,7 @@ export class KenyaLawClient {
     const encodedQuery = encodeURIComponent(query);
     const gazetteUrl = `${BASE_URL}/kenyagazette/cases/search?search_words=${encodedQuery}`;
 
-    const response = await fetch(gazetteUrl, {
+    const response = await fetchKenyaLaw(gazetteUrl, {
       headers: BROWSER_HEADERS,
       signal: AbortSignal.timeout(6000),
     });
@@ -1275,7 +1297,7 @@ export class KenyaLawClient {
     }
     if (!response.ok) throw new Error(`Kenya Law request failed: HTTP ${response.status}`);
 
-    const html = await response.text();
+    const html = new TextDecoder().decode(await readResponseBytes(response));
     const results: Array<{ title: string; url: string; date?: string; source: string }> = [];
 
     const linkRegex = /<a\s+[^>]*href=["'](http:\/\/kenyalaw\.org\/kenyagazette\/[^"']+)["'][^>]*>(.*?)<\/a>/gi;

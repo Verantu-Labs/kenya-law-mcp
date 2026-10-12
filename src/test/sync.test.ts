@@ -298,6 +298,41 @@ describe("Synchronized retrieval regressions", () => {
     }]);
   });
 
+  test("search and feed redirects cannot escape the official hosts", async () => {
+    const urls: string[] = [];
+    network = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      urls.push(String(input));
+      expect(init?.redirect).toBe("manual");
+      return new Response(null, { status: 302, headers: { Location: "https://127.0.0.1/private" } });
+    });
+    const result = await searchCaseLaw({ query: "offhost-search-fixture" });
+    expect(result.isError).toBe(true);
+    expect(urls.every(url => ["kenyalaw.org", "new.kenyalaw.org"].includes(new URL(url).hostname))).toBe(true);
+  });
+
+  test("oversized search bodies fail before parsing", async () => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async () => new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(new Uint8Array(20 * 1024 * 1024 + 1));
+      controller.close();
+    } })));
+    const result = await searchLegislation({ act_name: "oversized-search-fixture" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("20 MiB");
+  });
+
+  test("document caches evict by bytes as well as entry count", async () => {
+    const urls: string[] = [];
+    network = spyOn(globalThis, "fetch").mockImplementation(async input => {
+      urls.push(String(input));
+      return new Response(`<akomaNtoso><act><body><section><content><p>${"Cache byte fixture. ".repeat(160000)}</p></content></section></body></act></akomaNtoso>`);
+    });
+    for (let index = 0; index < 8; index++) await KenyaLawClient.getAknDocument(`/akn/ke/act/2020/byte-cache-${index}/source`);
+    await KenyaLawClient.getAknDocument("/akn/ke/act/2020/byte-cache-7/source");
+    expect(urls.length).toBe(8);
+    await KenyaLawClient.getAknDocument("/akn/ke/act/2020/byte-cache-0/source");
+    expect(urls.length).toBe(9);
+  });
+
   test("document caches evict old entries and expire reads", async () => {
     const urls: string[] = [];
     network = spyOn(globalThis, "fetch").mockImplementation(async input => {
@@ -332,7 +367,7 @@ describe("Synchronized retrieval regressions", () => {
   });
 });
 
-test.each(["2025-03-26", "2025-11-25"])("standalone stdio initializes, lists and calls tools with protocol %s", async (protocolVersion) => {
+test.each(["2025-03-26", "2025-11-25", "2026-07-28"])("standalone stdio discovers, lists and calls tools with protocol %s", async (protocolVersion) => {
   const child = Bun.spawn([process.execPath, "run", "src/index.ts"], { cwd: fileURLToPath(new URL("../..", import.meta.url)), stdin: "pipe", stdout: "pipe", stderr: "pipe" });
   const reader = child.stdout.getReader();
   const decoder = new TextDecoder();
@@ -350,25 +385,32 @@ test.each(["2025-03-26", "2025-11-25"])("standalone stdio initializes, lists and
   };
   const timeout = setTimeout(() => child.kill(), 5000);
   try {
-    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion, capabilities: {}, clientInfo: { name: "regression-test", version: "1" } } }) + "\n");
-    child.stdin.flush();
+    const meta = protocolVersion === "2026-07-28" ? { _meta: {
+      "io.modelcontextprotocol/protocolVersion": protocolVersion,
+      "io.modelcontextprotocol/clientInfo": { name: "regression-test", version: "1" },
+      "io.modelcontextprotocol/clientCapabilities": {},
+    } } : {};
+    const send = (id: number, method: string, params = {}) => {
+      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params: { ...params, ...meta } }) + "\n");
+      child.stdin.flush();
+    };
+    send(1, protocolVersion === "2026-07-28" ? "server/discover" : "initialize",
+      protocolVersion === "2026-07-28" ? {} : { protocolVersion, capabilities: {}, clientInfo: { name: "regression-test", version: "1" } });
     const initialized = await readResponse();
-    expect(initialized.result.serverInfo.name).toBe("kenya-law-mcp");
-    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
-    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }) + "\n");
-    child.stdin.flush();
+    expect((initialized.result.serverInfo ?? initialized.result._meta["io.modelcontextprotocol/serverInfo"]).name).toBe("kenya-law-mcp");
+    if (protocolVersion !== "2026-07-28") child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+    send(2, "tools/list");
     expect((await readResponse()).result.tools).toEqual(TOOLS);
-    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "search_case_law", arguments: {} } }) + "\n");
-    child.stdin.flush();
+    send(3, "tools/call", { name: "search_case_law", arguments: {} });
     expect((await readResponse()).result.isError).toBe(true);
     for (const [id, method, property] of [[4, "resources/list", "resources"], [5, "resources/templates/list", "resourceTemplates"], [6, "prompts/list", "prompts"]] as const) {
-      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method }) + "\n");
-      child.stdin.flush();
+      send(id, method);
       expect((await readResponse()).result[property].length).toBeGreaterThan(0);
     }
-    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 7, method: "resources/read", params: { uri: "kenyalaw://missing" } }) + "\n");
-    child.stdin.flush();
+    send(7, "resources/read", { uri: "kenyalaw://missing" });
     expect((await readResponse()).error.code).toBe(-32602);
+    child.stdin.end();
+    expect(await child.exited).toBe(0);
   } finally {
     clearTimeout(timeout);
     await reader.cancel();

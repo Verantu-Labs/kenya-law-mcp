@@ -110,7 +110,7 @@ To test the Worker locally, run `bunx wrangler dev --ip 127.0.0.1 --port 8799 --
 npx --yes @modelcontextprotocol/inspector --cli http://127.0.0.1:8799/mcp --method resources/list
 ```
 
-Inspector CLI checks cover protocol interoperability, not the Claude Desktop UI or a deployed Worker. A blocked live request is a failed access check, even when connection and discovery succeed.
+The automated suite also sends modern 2026-07-28 metadata directly through the production HTTP handler and stdio subprocess, including discovery, required headers, version errors and clean shutdown. Inspector CLI checks cover protocol interoperability, not the Claude Desktop UI or a deployed Worker. A blocked live request is a failed access check, even when connection and discovery succeed.
 
 ## Remaining verification
 

@@ -1,12 +1,17 @@
 import { createMcpServer, handleStatelessMcpRequest, TOOLS } from "./index.js";
-import { LATEST_PROTOCOL_VERSION, WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server";
+import { createMcpHandler, ProtocolError } from "@modelcontextprotocol/server";
 import openapiSchema from "../openapi.json";
+import { toolCallLimiter } from "./mcp/tool-limit.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, Accept",
+  "Access-Control-Allow-Headers": "Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Accept",
 };
+
+// One factory serves modern requests and legacy clients through the SDK's
+// stateless fallback. No client identity or capabilities are stored globally.
+const mcp = createMcpHandler(createMcpServer);
 
 export default {
   async fetch(request: Request): Promise<Response> {
@@ -42,9 +47,9 @@ export default {
       return new Response(
         JSON.stringify({
           status: "online",
-          specVersion: LATEST_PROTOCOL_VERSION,
+          specVersion: "2026-07-28",
           server: "kenya-law-mcp",
-          version: "0.2.0",
+          version: "0.1.0",
           runtime: "Cloudflare Workers",
           tools: TOOLS.map((t) => t.name),
           openapi: "/openapi.json",
@@ -55,39 +60,58 @@ export default {
       );
     }
 
+    // Bound streamed bytes before the SDK or REST JSON parser allocates a body.
+    const bodyChunks: ArrayBuffer[] = [];
+    let bodyLength = 0;
+    if (request.method === "POST" && request.body) {
+      const reader = request.body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          bodyLength += value.byteLength;
+          if (bodyLength > 128 * 1024) {
+            await reader.cancel();
+            return new Response("Request exceeds the 128 KiB limit", { status: 413, headers: CORS_HEADERS });
+          }
+          bodyChunks.push(new Uint8Array(value).buffer);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+    const boundedRequest = request.method === "POST"
+      ? new Request(request, { body: new Blob(bodyChunks) }) : request;
     // REST endpoints for OpenAPI / ChatGPT Custom GPT Actions (/api/v1/:toolName)
     if (request.method === "POST" && url.pathname.startsWith("/api/v1/")) {
       const toolName = url.pathname.replace("/api/v1/", "").trim();
       try {
-        const body = await request.json();
+        const body = await boundedRequest.json();
         if (!body || typeof body !== "object" || Array.isArray(body)) return new Response("Expected a JSON object", { status: 400, headers: CORS_HEADERS });
 
-        const responseJson = await handleStatelessMcpRequest(
-          {
-            jsonrpc: "2.0",
-            id: 1,
-            method: "tools/call",
-            params: { name: toolName, arguments: body },
-          }
-        );
-
-        if (responseJson?.error) {
-          return new Response(JSON.stringify(responseJson.error), {
-            status: 400,
-            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-          });
-        }
+        const responseJson = await toolCallLimiter.run(async () => {
+          const response = await handleStatelessMcpRequest(
+            {
+              jsonrpc: "2.0",
+              id: 1,
+              method: "tools/call",
+              params: { name: toolName, arguments: body },
+            }
+          );
+          if (response.error) throw new ProtocolError(response.error.code, response.error.message);
+          return response.result;
+        });
 
         // Return tool output content directly for REST/OpenAPI client
-        return new Response(JSON.stringify(responseJson?.result ?? responseJson), {
+        return new Response(JSON.stringify(responseJson), {
           status: 200,
           headers: { "Content-Type": "application/json", ...CORS_HEADERS },
         });
       } catch (err: any) {
         return new Response(
-          JSON.stringify({ error: `Internal execution error: ${err?.message || err}` }),
+          JSON.stringify({ error: err?.message || "Request execution failed." }),
           {
-            status: err instanceof SyntaxError ? 400 : 500,
+            status: err instanceof SyntaxError || err instanceof ProtocolError ? 400 : 500,
             headers: { "Content-Type": "application/json", ...CORS_HEADERS },
           }
         );
@@ -100,15 +124,8 @@ export default {
     if (request.method !== "POST") {
       return new Response("No server event stream is available", { status: 405, headers: { ...CORS_HEADERS, Allow: "POST, OPTIONS" } });
     }
-    const server = createMcpServer();
-    const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
-    try {
-      await server.connect(transport);
-      const response = await transport.handleRequest(request);
-      return new Response(response.body, { status: response.status,
-        headers: { ...Object.fromEntries(response.headers), ...CORS_HEADERS } });
-    } finally {
-      await server.close();
-    }
+    const response = await mcp.fetch(boundedRequest);
+    return new Response(response.body, { status: response.status,
+      headers: { ...Object.fromEntries(response.headers), ...CORS_HEADERS } });
   },
 };
