@@ -40,7 +40,7 @@ export const TOOLS: Tool[] = [
   {
     name: "get_akn_document",
     description:
-      "Fetches a raw Akoma Ntoso (AKN) legal document (Act, Judgment, or Legal Notice) or court judgment directory (e.g. /judgments/KESC/2022/) by AKN URI or URL, converting XML/HTML into structured non-truncated Markdown with OSCOLA citations.",
+      "Retrieves official AKN XML, HTML, DOCX or text-layer PDF documents, or court directories, as Markdown. PDFs retain page boundaries; OCR is not provided. Citation metadata is included only when available, and directories are discovery records.",
     inputSchema: {
       type: "object",
       properties: {
@@ -121,7 +121,7 @@ export const TOOLS: Tool[] = [
   {
     name: "search_legislation",
     description:
-      "Stateless search across Kenya Acts of Parliament and Legal Notices index (/akn/ke/act/). Returns AKN URIs to active revised statutes.",
+      "Searches Kenya Law legislation records and returns source URLs and titles. Discovery does not establish whether a statute is currently in force or which revision applies.",
     inputSchema: {
       type: "object",
       properties: {
@@ -140,7 +140,7 @@ export const TOOLS: Tool[] = [
   {
     name: "get_cause_list",
     description:
-      "Retrieves daily court cause lists by court station (e.g. 'Milimani Law Courts', 'Mombasa', 'Eldoret') and date. Essential for litigators preparing for court hearings.",
+      "Retrieves cause-list table entries for a station. Date filtering and hearing dates are not verified; confirm scheduling with the official source.",
     inputSchema: {
       type: "object",
       properties: {
@@ -174,7 +174,7 @@ export const TOOLS: Tool[] = [
   {
     name: "verify_citation",
     description:
-      "Verifies whether a legal citation string or neutral citation exists on Kenya Law, grounding LLM output and preventing hallucinations.",
+      "Retrieves an official record and checks available metadata against a citation. Existence does not establish current validity, a holding or judicial treatment. PDFs without identifying metadata cannot confirm a citation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -430,7 +430,7 @@ export async function handleStatelessMcpRequest(
               role: "user",
               content: {
                 type: "text",
-                text: `Please analyze the Kenyan statute '${act}':\n\n1. Call \`search_legislation\` for '${act}'.\n2. Use \`get_akn_document\` with the returned \`akn_url\` to fetch the active statute content.\n3. Provide a clear section-by-section breakdown of key rights, obligations, and penalties.`,
+                text: `Please analyze the Kenyan statute '${act}':\n\n1. Call \`search_legislation\` for '${act}'.\n2. Use \`get_akn_document\` with the returned \`akn_url\` to retrieve the official text; check its revision date and whether it applies to the question.\n3. Provide a clear section-by-section breakdown of key rights, obligations, and penalties, separating source text from interpretation and stating unresolved validity questions.`,
               },
             },
           ],
@@ -447,7 +447,24 @@ export async function handleStatelessMcpRequest(
 
   if (method === "tools/call") {
     const toolName = payload?.params?.name;
-    const toolArgs = payload?.params?.arguments || {};
+    const toolArgs = payload?.params?.arguments === undefined ? {} : payload.params.arguments;
+    if (!toolArgs || typeof toolArgs !== "object" || Array.isArray(toolArgs)) {
+      return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "Tool arguments must be a JSON object." } };
+    }
+    // Both SDK transports and REST share this boundary. Retain existing aliases,
+    // but reject malformed advertised fields before coercion or upstream requests.
+    for (const [name, schema] of Object.entries(TOOLS.find(tool => tool.name === toolName)?.inputSchema.properties ?? {})) {
+      if (toolArgs[name] === undefined) continue;
+      const field = schema as { type?: string };
+      const value = toolArgs[name];
+      if ((field.type === "string" && typeof value !== "string")
+        || (field.type === "number" && (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)))
+        || (field.type === "array" && (!Array.isArray(value) || value.some(item => typeof item !== "string")))
+        || (name === "limit" && value < 1)
+        || (name === "month" && (value < 1 || value > 12))) {
+        return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: `Invalid tool argument: ${name}.` } };
+      }
+    }
 
     let toolResult: any;
     try {

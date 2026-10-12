@@ -4,5 +4,6 @@
 startCommand:
   type: stdio
   config:
-    command: "npx"
-    args: ["-y", "@verantu-labs/kenya-law-mcp"]
+    # Clone, install dependencies and build first; no registry release is assumed.
+    command: "node"
+    args: ["dist/src/index.js"]

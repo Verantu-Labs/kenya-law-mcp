@@ -15,6 +15,7 @@ export interface ParsedAknDocument {
   oscolaCitation?: string;
   markdown: string;
   sectionsCount: number;
+  pageCount?: number;
 }
 
 /**

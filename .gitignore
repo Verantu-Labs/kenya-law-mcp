@@ -45,8 +45,12 @@ Thumbs.db
 # MCP Bundles
 *.mcpb
 
-# Local documentation & scratch files
-docs/
+# Only reviewed public guides are tracked; other local documentation stays private.
+docs/*
+!docs/architecture.md
+!docs/development.md
+
+# Local scratch files
 post.txt
 
 

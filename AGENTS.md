@@ -4,7 +4,7 @@
 
 ## Overview
 
-`@verantu-labs/kenya-law-mcp` is an open-source Model Context Protocol (MCP) server providing citation-complete access to Kenya legal documents (Akoma Ntoso statutes, judgments, cause lists, and citator metadata).
+`@verantu-labs/kenya-law-mcp` is an independent, open-source MCP server for official Kenya Law retrieval. Search results are discovery records; retrieval and metadata matching do not establish current legal validity or judicial treatment. See [architecture](docs/architecture.md) and [development](docs/development.md).
 
 ## Architecture & Layout
 

@@ -18,6 +18,49 @@ interface CacheEntry<T> {
 const documentCache = new Map<string, CacheEntry<ParsedAknDocument>>();
 const queryCache = new Map<string, CacheEntry<any>>();
 
+function cacheResult<T>(cache: Map<string, CacheEntry<T>>, key: string, entry: CacheEntry<T>): void {
+  for (const [cachedKey, value] of cache) {
+    if (Date.now() - value.timestamp >= CACHE_TTL_MS) cache.delete(cachedKey);
+  }
+  cache.delete(key);
+  if (cache.size >= 100) cache.delete(cache.keys().next().value!);
+  cache.set(key, entry);
+}
+
+async function readDocumentBytes(response: Response): Promise<Uint8Array> {
+  // Check streamed bytes too: Content-Length can be missing or describe compressed data.
+  const maxBytes = 20 * 1024 * 1024;
+  if (Number(response.headers.get("content-length")) > maxBytes) {
+    await response.body?.cancel();
+    throw new Error("Document exceeds the 20 MiB download limit.");
+  }
+  if (!response.body) throw new Error("Document response has no readable body.");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > maxBytes) {
+        await reader.cancel();
+        throw new Error("Document exceeds the 20 MiB download limit.");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 export class KenyaLawAccessBlockedError extends Error {
   readonly isBlocked = true;
   constructor(message: string = "Kenya Law portal access blocked (HTTP 403 Forbidden). Cannot search or retrieve case records.") {
@@ -86,7 +129,7 @@ export interface StatuteSearchResult {
 
 export interface CauseListEntry {
   court_station: string;
-  date: string;
+  date?: string;
   cause_number: string;
   parties: string;
   presiding_judge_coram?: string;
@@ -236,7 +279,7 @@ export async function resolveCourtStation(station: string | undefined, courtCode
       const name = match[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
       if (name) stations.push({ code: match[1].toUpperCase(), name });
     }
-    queryCache.set(cacheKey, { timestamp: now, data: stations });
+    cacheResult(queryCache, cacheKey, { timestamp: now, data: stations });
   }
 
   const normalized = normalizeCourtStation(requested);
@@ -361,12 +404,8 @@ async function extractWordDocumentXml(bytes: Uint8Array): Promise<string | null>
       const slice = bytes.subarray(dataStart, dataStart + compSize);
       if (compMethod === 8) {
         try {
-          const ds = new DecompressionStream("deflate-raw");
-          const writer = ds.writable.getWriter();
-          const decompressedText = new Response(ds.readable).text();
-          await writer.write(slice as any);
-          await writer.close();
-          return await decompressedText;
+          const stream = new Blob([new Uint8Array(slice)]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+          return decoder.decode(await readDocumentBytes(new Response(stream)));
         } catch {
           return null;
         }
@@ -397,35 +436,10 @@ function docxXmlToMarkdown(xml: string): string {
     .trim();
 }
 
-async function extractPdfText(bytes: Uint8Array): Promise<string | null> {
-  try {
-    const { extractText } = await import("unpdf");
-    const { text } = await extractText(bytes);
-    if (!text) return null;
-
-    if (Array.isArray(text)) {
-      const pages = text
-        .map((pageStr, idx) => {
-          const cleaned = pageStr.replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ").trim();
-          return `### Page ${idx + 1}\n\n${cleaned}`;
-        })
-        .filter((p) => p.length > 20);
-
-      if (pages.length === 0) return null;
-      return pages.join("\n\n---\n\n");
-    }
-
-    const singleText = String(text).trim();
-    return singleText.length > 0 ? singleText : null;
-  } catch {
-    return null;
-  }
-}
-
 export class KenyaLawClient {
   /**
    * Fetches an Akoma Ntoso document by AKN URI or URL.
-   * Validates official HTTPS paths and redirects, extracts HTML/XML/DOCX text,
+   * Validates official HTTPS paths and redirects, extracts HTML/XML/DOCX/PDF text,
    * and throws when access or readable document content cannot be established.
    */
   static async getAknDocument(aknUri: string): Promise<ParsedAknDocument> {
@@ -466,7 +480,7 @@ export class KenyaLawClient {
           markdown,
           sectionsCount: cases.length,
         };
-        documentCache.set(cacheKey, { timestamp: now, data: parsed });
+        cacheResult(documentCache, cacheKey, { timestamp: now, data: parsed });
         return parsed;
       } else {
         const years = await KenyaLawClient.fetchAvailableCourtYears(courtCode);
@@ -483,7 +497,7 @@ export class KenyaLawClient {
           markdown,
           sectionsCount: years.length,
         };
-        documentCache.set(cacheKey, { timestamp: now, data: parsed });
+        cacheResult(documentCache, cacheKey, { timestamp: now, data: parsed });
         return parsed;
       }
     }
@@ -497,19 +511,16 @@ export class KenyaLawClient {
         const response = await fetchDocument(fullUrl);
         if (response.status === 403) throw new KenyaLawAccessBlockedError();
         if (!response.ok) throw new Error(`HTTP ${response.status} when fetching Kenya Law document.`);
-        const bytes = new Uint8Array(await response.arrayBuffer());
+        const bytes = await readDocumentBytes(response);
         const text = new TextDecoder().decode(bytes);
         let parsed: ParsedAknDocument;
         if (text.startsWith("%PDF-") || response.headers.get("content-type")?.includes("application/pdf")) {
-          const pdfText = await extractPdfText(bytes);
-          if (!pdfText) throw new Error("PDF source contains no readable text streams.");
-          parsed = {
-            title: `Document ${aknUri}`,
-            docType: documentUrl.pathname.includes("/judgment/") ? "judgment" : "act",
-            aknUrl: aknUri,
-            markdown: `# Document ${aknUri}\n\n---\n\n${pdfText}`,
-            sectionsCount: Math.max(1, pdfText.split("\n\n").length),
-          };
+          const { extractPdfDocument } = await import("./pdf.js");
+          const pdf = await extractPdfDocument(bytes);
+          // Readable text is not verified citation metadata. Keep a bare PDF unclassified.
+          parsed = { title: `Document ${aknUri}`, docType: "unknown", aknUrl: aknUri,
+            markdown: `# Document ${aknUri}\n\n**AKN URI**: ${aknUri}\n\n${pdf.markdown}`,
+            sectionsCount: 0, pageCount: pdf.pageCount };
         } else if (bytes.length > 4 && new DataView(bytes.buffer).getUint32(0, true) === 0x04034b50) {
           const xml = await extractWordDocumentXml(bytes);
           const body = xml ? docxXmlToMarkdown(xml) : "";
@@ -523,26 +534,33 @@ export class KenyaLawClient {
           };
         } else {
           parsed = parseAknXml(text, aknUri);
-          const needsFullText = parsed.docType === "unknown" || parsed.markdown.includes("Loading PDF")
-            || parsed.markdown.includes("Do you want to load it") || text.includes('data-display-type="pdf"')
-            || parsed.markdown.length < 800;
+          const previewMarkdown = parsed.markdown;
+          const isPdfViewer = /data-display-type=["']pdf["']/i.test(text)
+            || /Loading PDF|Do you want to load it/i.test(parsed.markdown);
+          const needsFullText = parsed.docType === "unknown" || isPdfViewer || parsed.markdown.length < 800;
           if (needsFullText && !documentUrl.pathname.endsWith("/source")) {
-            const sourceUrl = new URL(fullUrl);
+            const sourceUrl = normalizeDocumentUrl(response.url || fullUrl);
             sourceUrl.pathname = `${sourceUrl.pathname.replace(/\/$/, "")}/source`;
             const candidates = [sourceUrl.href];
             const attachment = text.match(/href="([^"]*\.docx[^"]*)"/i)?.[1];
-            if (attachment) candidates.push(new URL(attachment.replace(/&amp;/g, "&"), fullUrl).href);
-            const pdfAttachment = text.match(/href="([^"]*(?:\/source|\.pdf)[^"]*)"/i)?.[1];
-            if (pdfAttachment) candidates.push(new URL(pdfAttachment.replace(/&amp;/g, "&"), fullUrl).href);
-            const sourcePdfUrl = new URL(fullUrl);
-            sourcePdfUrl.pathname = `${sourcePdfUrl.pathname.replace(/\/$/, "")}/source.pdf`;
-            candidates.push(sourcePdfUrl.href);
-
-            for (const candidate of candidates) {
+            if (attachment) candidates.push(new URL(attachment.replace(/&amp;/g, "&"), response.url || fullUrl).href);
+            const pdfAttachment = text.match(/href=["']([^"']*(?:\/source|\.pdf)[^"']*)["']/i)?.[1];
+            if (pdfAttachment) candidates.push(new URL(pdfAttachment.replace(/&amp;/g, "&"), response.url || fullUrl).href);
+            sourceUrl.pathname += ".pdf";
+            candidates.push(sourceUrl.href);
+            for (const candidate of new Set(candidates)) {
               try {
                 const source = await fetchDocument(candidate);
                 if (!source.ok) continue;
-                const sourceBytes = new Uint8Array(await source.arrayBuffer());
+                const sourceBytes = await readDocumentBytes(source);
+                if (new TextDecoder().decode(sourceBytes.subarray(0, 5)) === "%PDF-"
+                  || source.headers.get("content-type")?.includes("application/pdf")) {
+                  const { extractPdfDocument } = await import("./pdf.js");
+                  const pdf = await extractPdfDocument(sourceBytes);
+                  parsed = { ...parsed, markdown: `# ${parsed.title}\n\n**AKN URI**: ${aknUri}\n\n${pdf.markdown}`,
+                    sectionsCount: 0, pageCount: pdf.pageCount };
+                  break;
+                }
                 if (sourceBytes.length > 4 && new DataView(sourceBytes.buffer).getUint32(0, true) === 0x04034b50) {
                   const xml = await extractWordDocumentXml(sourceBytes);
                   const body = xml ? docxXmlToMarkdown(xml) : "";
@@ -552,17 +570,7 @@ export class KenyaLawClient {
                     sectionsCount: Math.max(1, body.split("\n\n").length) };
                   break;
                 }
-                const sourceText = new TextDecoder().decode(sourceBytes);
-                if (sourceText.startsWith("%PDF-") || source.headers.get("content-type")?.includes("application/pdf")) {
-                  const pdfText = await extractPdfText(sourceBytes);
-                  if (pdfText && pdfText.length > 50) {
-                    parsed = { ...parsed, docType: documentUrl.pathname.includes("/judgment/") ? "judgment" : "act",
-                      markdown: `# ${parsed.title}\n\n**AKN URI**: ${aknUri}\n\n---\n\n${pdfText}`,
-                      sectionsCount: Math.max(1, pdfText.split("\n\n").length) };
-                    break;
-                  }
-                }
-                const sourceParsed = parseAknXml(sourceText, aknUri);
+                const sourceParsed = parseAknXml(new TextDecoder().decode(sourceBytes), aknUri);
                 if (sourceParsed.docType !== "unknown") {
                   parsed = sourceParsed;
                   break;
@@ -572,12 +580,15 @@ export class KenyaLawClient {
               }
             }
           }
+          if (isPdfViewer && parsed.markdown === previewMarkdown) {
+            throw new Error("The PDF viewer's full source could not be read. Retrieve a readable official source or use OCR.");
+          }
         }
-        if (parsed.docType === "unknown"
+        if ((parsed.docType === "unknown" && !parsed.pageCount)
           || /Loading PDF|Do you want to load it/i.test(parsed.markdown)) {
           throw new Error("The response did not contain recognized, readable Kenya Law document text.");
         }
-        documentCache.set(cacheKey, { timestamp: now, data: parsed });
+        cacheResult(documentCache, cacheKey, { timestamp: now, data: parsed });
         return parsed;
       } catch (error) {
         failure = error;
@@ -631,7 +642,7 @@ export class KenyaLawClient {
           .filter((y) => !isNaN(y))
       )
     ).sort((a, b) => b - a);
-    queryCache.set(cacheKey, { timestamp: now, data: years });
+    cacheResult(queryCache, cacheKey, { timestamp: now, data: years });
     return years;
   }
 
@@ -752,16 +763,14 @@ export class KenyaLawClient {
       });
 
       const matches = scored.filter((s) => s.score > 1);
-      if (matches.length > 0) {
-        matches.sort((a, b) => b.score - a.score);
-        const finalResults = matches.map((m) => m.item).slice(0, limit);
-        queryCache.set(cacheKey, { timestamp: now, data: finalResults });
-        return finalResults;
-      }
+      matches.sort((a, b) => b.score - a.score);
+      const finalResults = matches.map((m) => m.item).slice(0, limit);
+      cacheResult(queryCache, cacheKey, { timestamp: now, data: finalResults });
+      return finalResults;
     }
 
     const finalResults = results.slice(0, limit);
-    queryCache.set(cacheKey, { timestamp: now, data: finalResults });
+    cacheResult(queryCache, cacheKey, { timestamp: now, data: finalResults });
     return finalResults;
   }
 
@@ -811,10 +820,11 @@ export class KenyaLawClient {
 
         if (qLower === "" || rawTitle.toLowerCase().includes(qLower) || rawUrl.toLowerCase().includes(qLower)) {
           try {
-            const urlObj = new URL(rawUrl);
+            const urlObj = normalizeDocumentUrl(rawUrl);
+            if (!urlObj.pathname.startsWith("/akn/ke/")) continue;
             results.push({
               title: rawTitle,
-              url: rawUrl,
+              url: urlObj.href,
               aknPath: urlObj.pathname,
             });
           } catch (_) {}
@@ -854,7 +864,7 @@ export class KenyaLawClient {
 
     // Helper function to extract search results from HTML
     const parseHtmlResults = (html: string, enforceCourtCode?: string, requireKeywordMatch: boolean = true) => {
-      const linkRegex = /<a\s+[^>]*href=["']((?:\/akn\/ke\/judgment\/|\/akn\/ke\/act\/|https?:\/\/kenyalaw\.org\/caselaw\/cases\/view\/)[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+      const linkRegex = /<a\s+[^>]*href=["']((?:\/akn\/ke\/judgment\/|https?:\/\/kenyalaw\.org\/caselaw\/cases\/view\/)[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
       let match: RegExpExecArray | null;
 
       while ((match = linkRegex.exec(html)) !== null && results.length < limit) {
@@ -884,7 +894,9 @@ export class KenyaLawClient {
         const citMatch = rawTitle.match(/\[\d{4}\]\s*(?:eKLR|KE[A-Z0-9]+\s+\d+)/i);
         const neutralCitation = citMatch ? citMatch[0] : undefined;
         const yearMatch = rawTitle.match(/\[(\d{4})\]/);
-        const year = yearMatch?.[1] ? parseInt(yearMatch[1], 10) : yearFrom || new Date().getFullYear();
+        const pathYear = aknPath.match(/\/judgment\/[^/]+\/(\d{4})\//)?.[1];
+        const year = yearMatch?.[1] ? Number(yearMatch[1]) : pathYear ? Number(pathYear) : undefined;
+        if (yearFrom && (year === undefined || year < yearFrom)) continue;
 
         // Infer court name from AKN path if available
         let inferredCourt = courtInfo ? courtInfo.name : (court || "Kenya Courts");
@@ -915,7 +927,7 @@ export class KenyaLawClient {
       ? await resolveCourtStation(courtStation, directoryCourtCode ?? "KEHC")
       : undefined;
     if (courtStation && !stationCode) {
-      queryCache.set(cacheKey, { timestamp: now, data: [] });
+      cacheResult(queryCache, cacheKey, { timestamp: now, data: [] });
       return [];
     }
     if (directoryCourtCode && extracted.year) {
@@ -928,7 +940,7 @@ export class KenyaLawClient {
         requestedMonth,
       );
       if (dirCases.length > 0) {
-        queryCache.set(cacheKey, { timestamp: now, data: dirCases });
+        cacheResult(queryCache, cacheKey, { timestamp: now, data: dirCases });
         return dirCases;
       }
     } else if (extracted.courtCode && !extracted.year) {
@@ -942,7 +954,7 @@ export class KenyaLawClient {
           limit
         );
         if (dirCases.length > 0) {
-          queryCache.set(cacheKey, { timestamp: now, data: dirCases });
+          cacheResult(queryCache, cacheKey, { timestamp: now, data: dirCases });
           return dirCases;
         }
       }
@@ -1000,6 +1012,11 @@ export class KenyaLawClient {
         const qWords = query.toLowerCase().trim().split(/\s+/).filter(w => w.length > 2);
 
         for (const item of fallbacks) {
+          if (!item.aknPath.startsWith("/akn/ke/judgment/")) continue;
+          if (courtInfo && !item.aknPath.includes(`/judgment/${courtInfo.code}/`)) continue;
+          const year = Number(item.aknPath.match(/\/judgment\/[^/]+\/(\d{4})\//)?.[1]
+            ?? item.title.match(/\[(\d{4})\]/)?.[1]) || undefined;
+          if (yearFrom && (year === undefined || year < yearFrom)) continue;
           const itemLower = (item.title + " " + item.aknPath).toLowerCase();
           const matchesKeyword = qWords.some(w => itemLower.includes(w));
 
@@ -1015,7 +1032,7 @@ export class KenyaLawClient {
               case_title: item.title,
               neutral_citation: item.title.match(/\[\d{4}\][^)]+/)?.[0],
               court: inferredCourt,
-              year: yearFrom || new Date().getFullYear(),
+              year,
               akn_url: item.aknPath,
               url: item.url,
               source: "kenyalaw.org",
@@ -1049,7 +1066,7 @@ export class KenyaLawClient {
     }
 
     if (results.length === 0 && upstreamFailure) throw upstreamFailure;
-    queryCache.set(cacheKey, { timestamp: now, data: results });
+    cacheResult(queryCache, cacheKey, { timestamp: now, data: results });
     return results;
   }
 
@@ -1118,6 +1135,7 @@ export class KenyaLawClient {
         const fallbacks = await KenyaLawClient.searchAtomFeedFallback("all", actName, limit);
         const actLower = actName.toLowerCase().trim();
         for (const item of fallbacks) {
+          if (!item.aknPath.startsWith("/akn/ke/act/")) continue;
           if (item.title.toLowerCase().includes(actLower) || item.aknPath.toLowerCase().includes(actLower)) {
             results.push({
               short_title: item.title,
@@ -1141,7 +1159,7 @@ export class KenyaLawClient {
     }
 
     if (results.length === 0 && upstreamFailure) throw upstreamFailure;
-    queryCache.set(cacheKey, { timestamp: now, data: results });
+    cacheResult(queryCache, cacheKey, { timestamp: now, data: results });
     return results;
   }
 
@@ -1178,22 +1196,23 @@ export class KenyaLawClient {
 
     while ((match = rowRegex.exec(html)) !== null && entries.length < 20) {
       if (!match[1]) continue;
-      const cells = match[1].split(/<td[^>]*>/i).map((c) => c.replace(/<[^>]+>/g, "").trim()).filter(Boolean);
-      if (cells.length >= 2) {
+      // Keep empty cells in place so missing coram/type values do not shift the time column.
+      const cells = Array.from(match[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi), cell => cell[1]!.replace(/<[^>]+>/g, "").trim());
+      if (cells[0] && cells[1]) {
         entries.push({
           court_station: courtStation,
-          date: targetDate || new Date().toISOString().split("T")[0]!,
-          cause_number: cells[0] || "N/A",
-          parties: cells[1] || "Unspecified Parties",
+          // The endpoint does not apply a date filter; never attach the requested date to a row.
+          cause_number: cells[0]!,
+          parties: cells[1]!,
           presiding_judge_coram: cells[2] || undefined,
-          hearing_type: cells[3] || "Mention / Hearing",
-          time: cells[4] || "09:00 AM",
+          hearing_type: cells[3] || undefined,
+          time: cells[4] || undefined,
           source_url: causeUrl,
         });
       }
     }
 
-    queryCache.set(cacheKey, { timestamp: now, data: entries });
+    cacheResult(queryCache, cacheKey, { timestamp: now, data: entries });
     return entries;
   }
 
@@ -1228,7 +1247,7 @@ export class KenyaLawClient {
       citing_cases: [],
     };
 
-    queryCache.set(cacheKey, { timestamp: now, data: citResult });
+    cacheResult(queryCache, cacheKey, { timestamp: now, data: citResult });
     return citResult;
   }
 
@@ -1275,7 +1294,7 @@ export class KenyaLawClient {
       }
     }
 
-    queryCache.set(cacheKey, { timestamp: now, data: results });
+    cacheResult(queryCache, cacheKey, { timestamp: now, data: results });
     return results;
   }
 

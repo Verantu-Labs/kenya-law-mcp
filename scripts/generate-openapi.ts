@@ -25,7 +25,7 @@ function buildOpenApiSpec() {
         },
         responses: {
           "200": {
-            description: "Successful response from Kenya Law AKN service",
+            description: "MCP tool envelope. Check isError before using content; HTTP 200 alone does not establish retrieval success.",
             content: {
               "application/json": {
                 schema: {

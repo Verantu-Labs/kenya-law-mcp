@@ -200,6 +200,37 @@ describe("Synchronized retrieval regressions", () => {
     expect(JSON.parse((await searchCaseLaw({ query: "no-matching-authority" })).content[0].text).results).toEqual([]);
   });
 
+  test("directory keyword misses do not return unrelated decisions", async () => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async () => new Response('<a href="/akn/ke/judgment/kesc/2018/900001">Synthetic unrelated decision (Judgment)</a>'));
+    expect(await KenyaLawClient.fetchCourtYearDirectory("KESC", 2018, ["missing-keyword"], 5)).toEqual([]);
+  });
+
+  test("case feed fallbacks retain court/year filters and reject statutes and off-host records", async () => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async input => new Response(String(input).includes("/feeds/")
+      ? '<feed>' + [
+        ["Synthetic boundary statute", "https://new.kenyalaw.org/akn/ke/act/2020/900001"],
+        ["Synthetic boundary wrong court", "https://new.kenyalaw.org/akn/ke/judgment/kehc/2020/900001"],
+        ["Synthetic boundary old decision", "https://new.kenyalaw.org/akn/ke/judgment/kesc/2010/900001"],
+        ["Synthetic boundary off-host", "https://example.test/akn/ke/judgment/kesc/2020/900001"],
+        ["Synthetic boundary decision", "https://new.kenyalaw.org/akn/ke/judgment/kesc/2020/900001"],
+      ].map(([title, url]) => `<entry><title>${title}</title><link href="${url}"/></entry>`).join("") + '</feed>'
+      : '<html><main>No direct results</main></html>'));
+    expect(await KenyaLawClient.searchCaseLaw("synthetic boundary", "KESC", 2020)).toEqual([{
+      case_title: "Synthetic boundary decision", court: "Supreme Court of Kenya", year: 2020,
+      akn_url: "/akn/ke/judgment/kesc/2020/900001", url: "https://new.kenyalaw.org/akn/ke/judgment/kesc/2020/900001",
+      source: "kenyalaw.org", oscola_citation: "Synthetic boundary decision",
+    }]);
+  });
+
+  test("legislation feeds do not classify judgments as statutes", async () => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async input => new Response(String(input).includes("/feeds/")
+      ? '<feed><entry><title>Synthetic Act dispute</title><link href="https://new.kenyalaw.org/akn/ke/judgment/kehc/2020/900002"/></entry><entry><title>Synthetic Act</title><link href="https://new.kenyalaw.org/akn/ke/act/2020/900002"/></entry></feed>'
+      : '<html><main>No direct results</main></html>'));
+    expect(await KenyaLawClient.searchLegislation("Synthetic Act")).toEqual([{
+      short_title: "Synthetic Act", akn_url: "/akn/ke/act/2020/900002", url: "https://new.kenyalaw.org/akn/ke/act/2020/900002", source: "kenyalaw.org",
+    }]);
+  });
+
   test.each(["[2020] KEHC 991", "[2020] KEHC 992"])("neutral citations resolve directly and verify retrieved metadata: %s", async citation => {
     const urls: string[] = [];
     network = spyOn(globalThis, "fetch").mockImplementation(async input => {
@@ -246,6 +277,58 @@ describe("Synchronized retrieval regressions", () => {
     const result = await response.json();
     expect(response.status).toBe(200);
     expect(JSON.parse(result.content[0].text).results[0].akn_url).toBe("/akn/ke/judgment/kesc/2016/901");
+  });
+
+  test("cause lists do not invent hearing dates, types or times", async () => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async () => new Response('<table><tr><th>Number</th><th>Parties</th></tr><tr><td>Fixture 1</td><td>Fixture parties</td></tr></table>'));
+    const result = await getCauseList({ court_station: "Fixture station", date: "2026-10-12" });
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      court_station: "Fixture station", date: "2026-10-12", date_filter_applied: false,
+      message: "The date is the requested date, not a verified hearing date. The source endpoint does not apply date filtering; confirm scheduling on the official cause list.",
+      count: 1, cause_list: [{ court_station: "Fixture station", cause_number: "Fixture 1", parties: "Fixture parties", source_url: "https://new.kenyalaw.org/causelists/?q=Fixture%20station" }],
+    });
+  });
+
+  test("empty cause-list cells preserve the source column positions", async () => {
+    network = spyOn(globalThis, "fetch").mockImplementation(async () => new Response('<tr><td>Fixture 2</td><td>Fixture parties</td><td></td><td></td><td>14:30</td></tr>'));
+    expect(await KenyaLawClient.getCauseList("Fixture columns", "2026-10-12")).toEqual([{
+      court_station: "Fixture columns", cause_number: "Fixture 2", parties: "Fixture parties",
+      presiding_judge_coram: undefined, hearing_type: undefined, time: "14:30",
+      source_url: "https://new.kenyalaw.org/causelists/?q=Fixture%20columns",
+    }]);
+  });
+
+  test("document caches evict old entries and expire reads", async () => {
+    const urls: string[] = [];
+    network = spyOn(globalThis, "fetch").mockImplementation(async input => {
+      urls.push(String(input));
+      return new Response('<akomaNtoso><act><body><section><content><p>Synthetic cache provision.</p></content></section></body></act></akomaNtoso>');
+    });
+    for (let index = 0; index <= 100; index++) await KenyaLawClient.getAknDocument(`/akn/ke/act/2020/cache-${index}/source`);
+    await KenyaLawClient.getAknDocument("/akn/ke/act/2020/cache-100/source");
+    expect(urls.length).toBe(101);
+    await KenyaLawClient.getAknDocument("/akn/ke/act/2020/cache-0/source");
+    expect(urls.length).toBe(102);
+    const clock = spyOn(Date, "now").mockReturnValue(Date.now() + 60 * 60 * 1000 + 1);
+    try {
+      await KenyaLawClient.getAknDocument("/akn/ke/act/2020/cache-100/source");
+      expect(urls.length).toBe(103);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  test.each([null, false, "not-an-object", [], { akn_urls: [1] }, { limit: -1 }, { limit: 1.5 }, { month: 13 }, { query: {} }])("malformed tool arguments fail before network access: %j", async args => {
+    const urls: string[] = [];
+    network = spyOn(globalThis, "fetch").mockImplementation(async input => {
+      urls.push(String(input));
+      return new Response("");
+    });
+    const result = await handleStatelessMcpRequest({ jsonrpc: "2.0", id: 1, method: "tools/call", params: {
+      name: typeof args === "object" && args && "akn_urls" in args ? "get_documents_bulk" : "search_case_law", arguments: args,
+    } });
+    expect(result).toEqual({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: result.error.message } });
+    expect(urls).toEqual([]);
   });
 });
 

@@ -18,7 +18,7 @@
   "paths": {
     "/api/v1/get_akn_document": {
       "post": {
-        "summary": "Fetches a raw Akoma Ntoso (AKN) legal document (Act, Judgment, or Legal Notice) or court judgment directory (e.g. /judgments/KESC/2022/) by AKN URI or URL, converting XML/HTML into structured non-truncated Markdown with OSCOLA citations.",
+        "summary": "Retrieves official AKN XML, HTML, DOCX or text-layer PDF documents, or court directories, as Markdown. PDFs retain page boundaries; OCR is not provided. Citation metadata is included only when available, and directories are discovery records.",
         "operationId": "get_akn_document",
         "requestBody": {
           "required": true,
@@ -49,7 +49,7 @@
         },
         "responses": {
           "200": {
-            "description": "Successful response from Kenya Law AKN service",
+            "description": "MCP tool envelope. Check isError before using content; HTTP 200 alone does not establish retrieval success.",
             "content": {
               "application/json": {
                 "schema": {
@@ -89,7 +89,7 @@
         },
         "responses": {
           "200": {
-            "description": "Successful response from Kenya Law AKN service",
+            "description": "MCP tool envelope. Check isError before using content; HTTP 200 alone does not establish retrieval success.",
             "content": {
               "application/json": {
                 "schema": {
@@ -151,7 +151,7 @@
         },
         "responses": {
           "200": {
-            "description": "Successful response from Kenya Law AKN service",
+            "description": "MCP tool envelope. Check isError before using content; HTTP 200 alone does not establish retrieval success.",
             "content": {
               "application/json": {
                 "schema": {
@@ -165,7 +165,7 @@
     },
     "/api/v1/search_legislation": {
       "post": {
-        "summary": "Stateless search across Kenya Acts of Parliament and Legal Notices index (/akn/ke/act/). Returns AKN URIs to active revised statutes.",
+        "summary": "Searches Kenya Law legislation records and returns source URLs and titles. Discovery does not establish whether a statute is currently in force or which revision applies.",
         "operationId": "search_legislation",
         "requestBody": {
           "required": true,
@@ -192,7 +192,7 @@
         },
         "responses": {
           "200": {
-            "description": "Successful response from Kenya Law AKN service",
+            "description": "MCP tool envelope. Check isError before using content; HTTP 200 alone does not establish retrieval success.",
             "content": {
               "application/json": {
                 "schema": {
@@ -206,7 +206,7 @@
     },
     "/api/v1/get_cause_list": {
       "post": {
-        "summary": "Retrieves daily court cause lists by court station (e.g. 'Milimani Law Courts', 'Mombasa', 'Eldoret') and date. Essential for litigators preparing for court hearings.",
+        "summary": "Retrieves cause-list table entries for a station. Date filtering and hearing dates are not verified; confirm scheduling with the official source.",
         "operationId": "get_cause_list",
         "requestBody": {
           "required": true,
@@ -233,7 +233,7 @@
         },
         "responses": {
           "200": {
-            "description": "Successful response from Kenya Law AKN service",
+            "description": "MCP tool envelope. Check isError before using content; HTTP 200 alone does not establish retrieval success.",
             "content": {
               "application/json": {
                 "schema": {
@@ -270,7 +270,7 @@
         },
         "responses": {
           "200": {
-            "description": "Successful response from Kenya Law AKN service",
+            "description": "MCP tool envelope. Check isError before using content; HTTP 200 alone does not establish retrieval success.",
             "content": {
               "application/json": {
                 "schema": {
@@ -284,7 +284,7 @@
     },
     "/api/v1/verify_citation": {
       "post": {
-        "summary": "Verifies whether a legal citation string or neutral citation exists on Kenya Law, grounding LLM output and preventing hallucinations.",
+        "summary": "Retrieves an official record and checks available metadata against a citation. Existence does not establish current validity, a holding or judicial treatment. PDFs without identifying metadata cannot confirm a citation.",
         "operationId": "verify_citation",
         "requestBody": {
           "required": true,
@@ -307,7 +307,7 @@
         },
         "responses": {
           "200": {
-            "description": "Successful response from Kenya Law AKN service",
+            "description": "MCP tool envelope. Check isError before using content; HTTP 200 alone does not establish retrieval success.",
             "content": {
               "application/json": {
                 "schema": {
@@ -348,7 +348,7 @@
         },
         "responses": {
           "200": {
-            "description": "Successful response from Kenya Law AKN service",
+            "description": "MCP tool envelope. Check isError before using content; HTTP 200 alone does not establish retrieval success.",
             "content": {
               "application/json": {
                 "schema": {
