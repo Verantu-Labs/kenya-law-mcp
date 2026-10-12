@@ -100,11 +100,8 @@ Stdio (`serveStdio`) and HTTP (`createMcpHandler`) use the SDK entries for the 2
 
 ```sh
 bun install --frozen-lockfile
-bun test
-bun audit
+bun run verify:worker
 bun run test:live
-bun run typecheck
-bun run build
 bun run openapi
 ```
 

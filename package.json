@@ -4,6 +4,7 @@
   "private": true,
   "description": "Model Context Protocol (MCP) server for querying Kenya legal databases, including court judgments, Acts of Parliament, daily cause lists, and official Gazettes.",
   "type": "module",
+  "packageManager": "bun@1.4.0",
   "engines": {
     "node": ">=22"
   },
@@ -29,6 +30,8 @@
     "build": "bun run scripts/build.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "verify": "bun audit && bun run typecheck && bun test && bun run build && git diff --check",
+    "verify:worker": "bun run verify && bunx --no-install wrangler deploy --dry-run",
     "openapi": "bun run scripts/generate-openapi.ts",
     "inspector": "npx @modelcontextprotocol/inspector bun run src/index.ts",
     "test:live": "bun run scripts/live-smoke.ts"

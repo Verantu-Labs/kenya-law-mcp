@@ -56,7 +56,7 @@ src/
 
 ## Guardrails
 
-- **Always**: Verify all tests pass (`bun test`) and TypeScript compiles (`bun run build`) before completing a task.
+- **Always**: Run `bun run verify:worker` before committing or proposing a push/PR; review the full and staged diff, scan for secrets/private material and report any unavailable checks. See [development checks](docs/development.md). Pushes and PR publication require explicit approval; never change protection rules or disable security-critical workflows without approval.
 - **Ask First**: Ask before modifying public MCP tool names or JSON schema parameters.
 - **Never**: Commit credentials, hardcode unnormalized relative fetch URLs, or swallow network exceptions silently.
 
