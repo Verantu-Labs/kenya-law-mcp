@@ -5,6 +5,8 @@
  */
 
 import { XMLParser } from "fast-xml-parser";
+import { parseDocument } from "htmlparser2";
+import { escapeMarkdownText, htmlElements, markdownDestination, nodeToText } from "../parsing/text.js";
 
 export interface ParsedAknDocument {
   title: string;
@@ -15,6 +17,7 @@ export interface ParsedAknDocument {
   oscolaCitation?: string;
   markdown: string;
   sectionsCount: number;
+  pageCount?: number;
 }
 
 /**
@@ -31,7 +34,7 @@ export function parseAknXml(xmlContent: string, fallbackUrl?: string): ParsedAkn
   }
 
   // Fast check: If document is raw HTML fallback rather than AKN XML
-  if (xmlContent.includes("<!DOCTYPE html>") || (xmlContent.includes("<html") && !xmlContent.includes("<akomaNtoso"))) {
+  if (/<!doctype\s+html|<html(?:\s|>)/i.test(xmlContent) && !xmlContent.includes("<akomaNtoso")) {
     return parseHtmlFallback(xmlContent, fallbackUrl);
   }
 
@@ -76,18 +79,18 @@ export function parseAknXml(xmlContent: string, fallbackUrl?: string): ParsedAkn
 
     // Convert XML Body to Structured Markdown
     const markdownLines: string[] = [];
-    markdownLines.push(`# ${title}\n`);
+    markdownLines.push(`# ${escapeMarkdownText(title)}\n`);
     if (oscolaCitation) {
-      markdownLines.push(`**OSCOLA Citation**: \`${oscolaCitation}\`  `);
+      markdownLines.push(`**OSCOLA Citation**: ${escapeMarkdownText(oscolaCitation)}  `);
     }
     if (court) {
-      markdownLines.push(`**Court**: ${court}  `);
+      markdownLines.push(`**Court**: ${escapeMarkdownText(court)}  `);
     }
     if (publicationDate) {
-      markdownLines.push(`**Date**: ${publicationDate}  `);
+      markdownLines.push(`**Date**: ${escapeMarkdownText(publicationDate)}  `);
     }
     if (fallbackUrl) {
-      markdownLines.push(`**AKN URI**: [${fallbackUrl}](${fallbackUrl})  `);
+      markdownLines.push(`**AKN URI**: [${escapeMarkdownText(fallbackUrl)}](${markdownDestination(fallbackUrl)})  `);
     }
     markdownLines.push("\n---\n");
 
@@ -123,7 +126,7 @@ export function parseAknXml(xmlContent: string, fallbackUrl?: string): ParsedAkn
  */
 function renderElementToMarkdown(node: any, level = 1): { md: string; count: number } {
   if (!node) return { md: "", count: 0 };
-  if (typeof node === "string") return { md: node, count: 0 };
+  if (typeof node === "string") return { md: escapeMarkdownText(node), count: 0 };
   if (typeof node === "number" || typeof node === "boolean") return { md: String(node), count: 0 };
 
   let result = "";
@@ -149,7 +152,7 @@ function renderElementToMarkdown(node: any, level = 1): { md: string; count: num
       const itemHead = item.heading ? (typeof item.heading === "object" ? item.heading["#text"] || "" : item.heading) : "";
 
       const headerPrefix = "#".repeat(Math.min(level + 1, 4));
-      const titleLine = [itemNum, itemHead].filter(Boolean).join(" ");
+      const titleLine = [itemNum, itemHead].filter(Boolean).map(value => escapeMarkdownText(String(value))).join(" ");
       if (titleLine) {
         result += `\n${headerPrefix} ${titleLine}\n\n`;
       }
@@ -163,7 +166,7 @@ function renderElementToMarkdown(node: any, level = 1): { md: string; count: num
   if (node.p) {
     const pList = Array.isArray(node.p) ? node.p : [node.p];
     for (const p of pList) {
-      const pText = typeof p === "object" ? p["#text"] || renderElementToMarkdown(p, level).md : p;
+      const pText = typeof p === "object" ? (p["#text"] ? escapeMarkdownText(String(p["#text"])) : renderElementToMarkdown(p, level).md) : escapeMarkdownText(String(p));
       if (pText && String(pText).trim()) {
         result += `${String(pText).trim()}\n\n`;
       }
@@ -183,70 +186,37 @@ function renderElementToMarkdown(node: any, level = 1): { md: string; count: num
 
   // Direct text node
   if (node["#text"]) {
-    result += `${node["#text"]}\n`;
+    result += `${escapeMarkdownText(String(node["#text"]))}\n`;
   }
 
   return { md: result.trim(), count };
 }
 
 function parseHtmlFallback(htmlContent: string, fallbackUrl?: string): ParsedAknDocument {
-  // 1. Extract title
-  const titleMatch =
-    htmlContent.match(/<title[^>]*>(.*?)<\/title>/i) ||
-    htmlContent.match(/<h1[^>]*>(.*?)<\/h1>/i);
-  let title = titleMatch?.[1] ? titleMatch[1].replace(/<[^>]+>/g, "").trim() : "Kenyan Legal Document";
-  title = title.replace(/\s+-\s+Kenya Law$/i, "").replace(/&amp;/g, "&").trim();
-
-  // 2. Locate content boundary to strip external navbars, headers, and footers
-  let targetHtml = htmlContent;
-  const coverIdx = htmlContent.indexOf('<div class="coverpage">');
-  const aknIdx = htmlContent.indexOf('<span class="akn-akomaNtoso">');
-  const docIdx = htmlContent.search(/<div[^>]*class=["'][^"']*(?:akn-document|judgment|act-body|content-container)[^"']*["']/i);
-  const mainIdx = htmlContent.indexOf('<main');
-  const articleIdx = htmlContent.indexOf('<article');
-
-  const startIdx = coverIdx !== -1
-    ? coverIdx
-    : (aknIdx !== -1 ? aknIdx : (docIdx !== -1 ? docIdx : (mainIdx !== -1 ? mainIdx : (articleIdx !== -1 ? articleIdx : 0))));
-
-  targetHtml = targetHtml.slice(startIdx);
-
-  const footerIdx = targetHtml.indexOf('<footer');
-  if (footerIdx !== -1) {
-    targetHtml = targetHtml.slice(0, footerIdx);
-  }
-
-  // 3. Clean tags into structured markdown
-  const cleanText = targetHtml
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
-    .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
-    .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, "")
-    .replace(/<p[^>]*>/gi, "\n\n")
-    .replace(/<div[^>]*>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&#160;/g, " ")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n[ \t]+/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  const document = parseDocument(htmlContent);
+  const elements = Array.from(htmlElements(document, { excludeNonContent: true }));
+  const titleNode = elements.find(element => element.name === "title")
+    ?? elements.find(element => element.name === "h1");
+  const title = (titleNode ? nodeToText(titleNode) : "Kenyan Legal Document").replace(/\s+-\s+Kenya Law$/i, "").trim();
+  // Select complete source containers, not a regex slice that can include site
+  // chrome or be confused by quoted attributes and malformed closing tags.
+  const sourceNode = elements.find(element => (element.attribs.class ?? "").split(/\s+/)
+    .some(name => ["akn-akomaNtoso", "akn-act", "akn-judgment", "akn-document", "judgment", "act-body", "content-container"].includes(name)))
+    ?? elements.find(element => element.name === "main")
+    ?? elements.find(element => element.name === "article")
+    ?? elements.find(element => element.name === "body")
+    ?? document;
+  const cleanText = nodeToText(sourceNode);
 
   const lowerUrl = (fallbackUrl || "").toLowerCase();
-  const hasDocumentMarkup = /class=["'][^"']*\bakn-(?:akomaNtoso|act|judgment|document)\b/i.test(htmlContent);
+  const hasDocumentMarkup = elements.some(element => (element.attribs.class ?? "").split(/\s+/)
+    .some(name => ["akn-akomaNtoso", "akn-act", "akn-judgment", "akn-document"].includes(name)));
   const docType: ParsedAknDocument["docType"] = !hasDocumentMarkup || !cleanText ? "unknown" :
     lowerUrl.includes("/act/") || cleanText.includes("LAWS OF KENYA")
       ? "act"
       : (lowerUrl.includes("/judgment/") || cleanText.includes("JUDGMENT") || cleanText.includes("RULING") ? "judgment" : "unknown");
 
-  const markdown = `# ${title}\n\n${fallbackUrl ? `**AKN URI**: ${fallbackUrl}\n\n---\n\n` : ""}${cleanText}`;
+  const markdown = `# ${escapeMarkdownText(title)}\n\n${fallbackUrl ? `**AKN URI**: ${escapeMarkdownText(fallbackUrl)}\n\n---\n\n` : ""}${escapeMarkdownText(cleanText)}`;
 
   return {
     title,

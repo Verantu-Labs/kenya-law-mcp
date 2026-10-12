@@ -4,6 +4,7 @@
  */
 
 import { KenyaLawClient } from "../../client/kenyaLawClient.js";
+import { escapeMarkdownText, markdownDestination } from "../../parsing/text.js";
 
 export const RESOURCE_TEMPLATES = [
   {
@@ -62,8 +63,8 @@ export async function readMcpResource(uri: string) {
     if (!station.trim()) throw new Error("A court station is required.");
     const entries = await KenyaLawClient.getCauseList(station);
     return { contents: [{ uri, mimeType: "text/markdown",
-      text: `# Cause list search: ${station}\n\nConfirm dates and hearing details in the official source.\n\n`
-        + (entries.length ? entries.map(entry => `- **${entry.cause_number}**: ${entry.parties} ([source](${entry.source_url}))`).join("\n")
+      text: `# Cause list search: ${escapeMarkdownText(station)}\n\nConfirm dates and hearing details in the official source.\n\n`
+        + (entries.length ? entries.map(entry => `- **${escapeMarkdownText(entry.cause_number)}**: ${escapeMarkdownText(entry.parties)} ([source](${markdownDestination(entry.source_url)}))`).join("\n")
           : "No entries were extracted; this does not establish that no hearings are scheduled."),
     }] };
   }

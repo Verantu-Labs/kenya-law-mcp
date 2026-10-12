@@ -6,11 +6,11 @@ Install this repository as described in [README.md](README.md). No API key is re
 
 Configure the client's MCP server command as `bun`, with arguments `run` and the absolute path to `src/index.ts`.
 
-Alternatively, build with `bun run build` and configure `node` with the absolute path to `dist/src/index.js`. Keep dependencies installed beside compiled files. Local stdio sends retrieval requests directly from the machine running the server.
+Alternatively, install Node 22+, build with `bun run build` and configure `node` with the absolute path to `dist/src/index.js`. Keep dependencies installed beside compiled files. Local stdio sends retrieval requests directly from the machine running the server.
 
 ### Claude Desktop
 
-Use Claude Desktop's local MCP configuration (`claude_desktop_config.json`), as described in the [official MCP guide](https://github.com/modelcontextprotocol/docs/blob/main/quickstart/user.mdx). Add the `mcpServers` entry from the README alongside existing entries and restart Claude Desktop. Use an absolute executable path if `bun` or `node` is not visible to desktop applications through PATH. The compiled Node configuration on Windows can look like:
+Use Claude Desktop's local MCP configuration (`claude_desktop_config.json`), as described in the [official MCP guide](https://modelcontextprotocol.io/docs/develop/connect-local-servers). Add the `mcpServers` entry from the README alongside existing entries and restart Claude Desktop. Use an absolute executable path if `bun` or `node` is not visible to desktop applications through PATH. The compiled Node configuration on Windows can look like:
 
 ```json
 {
@@ -24,6 +24,46 @@ Use Claude Desktop's local MCP configuration (`claude_desktop_config.json`), as 
 ```
 
 Replace the example path with your checkout. Local stdio handshakes, tool discovery and calls are tested; the Claude Desktop UI itself is not covered by this repository's tests. Local servers and remote connectors are [separate connection mechanisms](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp).
+
+## Other client configurations
+
+These examples follow official configuration requirements. Their application UIs have not been tested here; do not treat documented configuration as a completed integration test.
+
+### Claude Code
+
+Follow the [official stdio instructions](https://code.claude.com/docs/en/mcp):
+
+```sh
+claude mcp add --transport stdio kenya-law -- bun run /absolute/path/kenya-law-mcp/src/index.ts
+```
+
+### Cursor
+
+Put this in `.cursor/mcp.json` for a project, or `~/.cursor/mcp.json` globally, following [Cursor's MCP documentation](https://cursor.com/docs/mcp):
+
+```json
+{
+  "mcpServers": {
+    "kenya-law": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["run", "/absolute/path/kenya-law-mcp/src/index.ts"]
+    }
+  }
+}
+```
+
+### Codex CLI
+
+Use the [official MCP configuration](https://developers.openai.com/codex/mcp) in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.kenya-law]
+command = "bun"
+args = ["run", "/absolute/path/kenya-law-mcp/src/index.ts"]
+```
+
+Use the real absolute path and, if necessary, the absolute executable path. Keep existing server entries. Client approval policies and tool timeouts remain client settings; source fallbacks can take longer than one HTTP timeout.
 
 ## Remote HTTP transport
 
@@ -70,4 +110,8 @@ To test the Worker locally, run `bunx wrangler dev --ip 127.0.0.1 --port 8799 --
 npx --yes @modelcontextprotocol/inspector --cli http://127.0.0.1:8799/mcp --method resources/list
 ```
 
-Inspector CLI checks cover protocol interoperability, not the Claude Desktop UI or a deployed Worker. A blocked live request is a failed access check, even when connection and discovery succeed.
+The automated suite also sends modern 2026-07-28 metadata directly through the production HTTP handler and stdio subprocess, including discovery, required headers, version errors and clean shutdown. Inspector CLI checks cover protocol interoperability, not the Claude Desktop UI or a deployed Worker. A blocked live request is a failed access check, even when connection and discovery succeed.
+
+## Remaining verification
+
+Local protocol tests and configuration-document checks do not certify Claude Desktop, Claude Code, Cursor or Codex UI behavior. Confirm discovery, an actual readable authority and an explicit failure in the intended application. Check live access from the user/deployment network; source blocks must be reported honestly. Local builds and changes to this checkout are not remote releases.

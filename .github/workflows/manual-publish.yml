@@ -1,21 +1,21 @@
-name: Manual Package & Deploy
+name: Manual Build & Deploy
 
 on:
   workflow_dispatch:
     inputs:
-      publish_npm:
-        description: 'Publish package to GitHub Packages / NPM'
-        type: boolean
-        default: false
       deploy_cloudflare:
         description: 'Deploy to Cloudflare Workers'
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 jobs:
   manual-publish:
     name: Manual Release Actions
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
@@ -23,20 +23,14 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
-      - name: Build Output
-        run: bun run build
-
-      - name: Publish to GitHub Packages (NPM Registry)
-        if: ${{ inputs.publish_npm }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          npm config set //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
-          npm publish --registry=https://npm.pkg.github.com || true
+      - name: Verify source
+        run: bun run verify
 
       - name: Deploy to Cloudflare Workers
         if: ${{ inputs.deploy_cloudflare }}

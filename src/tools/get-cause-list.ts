@@ -43,6 +43,8 @@ export async function getCauseList(args: Args) {
             {
               court_station: courtStation,
               date: args.date || new Date().toISOString().split("T")[0],
+              date_filter_applied: false,
+              message: "The date is the requested date, not a verified hearing date. The source endpoint does not apply date filtering; confirm scheduling on the official cause list.",
               count: results.length,
               cause_list: results,
             },

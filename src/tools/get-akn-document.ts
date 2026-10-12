@@ -1,4 +1,5 @@
 import { KenyaLawClient } from "../client/kenyaLawClient.js";
+import { escapeMarkdownText } from "../parsing/text.js";
 
 type Args = {
   akn_url?: string;
@@ -80,7 +81,7 @@ export async function getAknDocument(args: Args) {
         content: [
           {
             type: "text" as const,
-            text: `# ${doc.title} - Section/Article ${num}\n\n**AKN URI**: ${aknUrl}\n\n---\n\n${match[0].trim()}`,
+            text: `# ${escapeMarkdownText(doc.title)} - Section/Article ${num}\n\n**AKN URI**: ${escapeMarkdownText(aknUrl)}\n\n---\n\n${match[0].trim()}`,
           },
         ],
       };

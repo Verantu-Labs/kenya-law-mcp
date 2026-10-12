@@ -1,0 +1,55 @@
+# Architecture
+
+Kenya Law MCP is an independent, read-only server. It requires no application backend, database, account or model provider. Generic retrieval belongs in this upstream project; application-specific reasoning and workflows belong in its consumers.
+
+```mermaid
+flowchart TD
+  A[MCP clients] -->|Local stdio| B[src/index.ts: SDK server]
+  A -->|Streamable HTTP| C[src/worker.ts: SDK transport]
+  D[REST integrations] --> C
+  B --> E[handleStatelessMcpRequest]
+  C --> E
+  E --> F[Tool and resource handlers]
+  F --> G[KenyaLawClient]
+  G --> H[Official Kenya Law HTTPS sources]
+  G --> I[AKN, HTML, DOCX and PDF parsing]
+  I --> J[Markdown or JSON in MCP envelopes]
+```
+
+## Communication
+
+[`createMcpServer`](../src/index.ts) registers eight tools, resources and research prompts with the installed MCP SDK. `handleStatelessMcpRequest` shares dispatch across transports, validates JSON-RPC envelopes and advertised argument types, and keeps existing handler aliases. Tool names and parameter schemas are unchanged. Malformed advertised numbers, months and array items fail before retrieval.
+
+[`worker.ts`](../src/worker.ts) uses the SDK `createMcpHandler` entry at `/mcp` and shared dispatch at `/api/v1/<tool>`. Accepted legacy notifications return 202; GET event streams are unavailable and return 405. The SDK serves revision 2026-07-28 through per-request metadata and `server/discover`; the same factory supports legacy initialization. Stdio uses `serveStdio`. No tasks, sampling, elicitation or custom extensions are added. HTTP bodies stop at 128 KiB. [`generate-openapi.ts`](../scripts/generate-openapi.ts) generates REST schemas from `TOOLS`.
+
+Results use `content` and optionally `isError`. Some text blocks contain JSON; documents contain Markdown. HTTP 200 is not tool success. Resource failures are protocol errors. Public research prompts guide the client; this server does not call an LLM or generate interpretations.
+
+## Retrieval
+
+[`KenyaLawClient`](../src/client/kenyaLawClient.ts) uses official directories, searches and feeds. Directory pagination reaches page 2 only. Discovery records are separate from readable documents. Citation verification checks identifying metadata after retrieval; `check_citator` returns `not_checked` for subsequent treatment.
+
+`normalizeDocumentUrl` permits HTTPS on `kenyalaw.org` and `new.kenyalaw.org`, with AKN/judgment-directory paths and no credentials or custom ports. `fetchKenyaLaw` validates every redirect and stops after five redirects. Viewer sources resolve relative to the canonical response URL and pass the same validation. All upstream response bodies and decompressed DOCX XML stop at 20 MiB. Search/feed requests share the official-host redirect boundary, without the document-specific path restriction. Redirect bodies are cancelled; a single request deadline spans redirects and body consumption.
+
+[`parseAknXml`](../src/akn/parser.ts) handles XML and recognized HTML markup. The client extracts DOCX body XML with supported ZIP methods. [`extractPdfDocument`](../src/client/pdf.ts) uses the existing `unpdf` PDF.js engine, accepts bytes, reads at most 500 pages sequentially and destroys its loading task. It does not render PDFs, follow PDF links or execute PDF actions. Blank pages retain their positions and an OCR notice; entirely unreadable PDFs fail.
+
+Bare PDFs can be readable with `docType: "unknown"` and `pageCount`; readability does not certify identity. Viewer sources can retain available official-page metadata. No title, citation or legal status is inferred solely from a PDF text layer. Provision extraction is heuristic and fails when the requested boundary cannot be located.
+
+## Source text and rendering
+
+[`parsing/text.ts`](../src/parsing/text.ts) extracts HTML/DOCX text with `htmlparser2`, decodes entities once, excludes active/site elements and walks nodes iteratively. HTML fallback and cause-list cells use parsed elements rather than regex tag removal. Discovery titles remain plain text in JSON. JSON strings must be displayed as text by consumers, not assigned to HTML sinks.
+
+Markdown output escapes literal HTML delimiters, source formatting, links/images and GFM autolinks. AKN XML text/metadata, HTML, DOCX, PDF, directory tables, section headers and cause-list resources share this boundary. Literal comparisons and citation brackets remain visible when rendered. Only server-generated official source links are active, with delimiter-safe destinations. This is text extraction and output escaping, not a general-purpose HTML sanitizer or a guarantee about every client's renderer. Retrieved text can still contain misleading instructions; client execution policies remain necessary.
+
+## Privacy and storage
+
+Document/query maps each retain at most 100 entries for one hour. Writes drop expired entries and evict the oldest insertion at capacity; reads do not promote entries. This is not an LRU policy. Each map also caps serialized data at 16 MiB, evicting older entries or skipping an oversized entry. There is no disk storage or durable cache.
+
+Local stdio sends queries/URLs from the user's machine to Kenya Law; remote connections also send them through the host. Tools do not read workspace files, upload private documents or use model keys. Source text is untrusted evidence, not permission to perform privileged actions. Consumers must enforce their own execution and privacy boundaries.
+
+## Deployment and unresolved limits
+
+The Worker has no authentication. MCP and REST tool calls share a process/isolate budget of 60 starts per rolling minute and 4 concurrent calls, with capacity errors and slots released on failure. Resources still use the bounded upstream fetcher but do not use this tool invocation budget. It rejects opaque, malformed and non-HTTPS browser origins but accepts other HTTPS origins. Per-request timeouts, tool budgets, bulk caps and parser limits are not distributed abuse controls. Operators must assess capacity, hosting privacy and upstream conditions before deployment. Worker observability is enabled; hosting logs/retention are an operator responsibility. Application code does not log queries or retrieved text.
+
+Cross-isolate concurrency and parsing CPU are not globally bounded. Per-response and cache limits do not bound total process memory under arbitrary concurrent calls. HTML/DOCX parsing, PDF text order and section boundaries need source inspection. Cause lists do not verify dates; Gazette access uses a legacy interface. No OCR, comprehensive citator, amendment graph or validity service is implemented.
+
+Synthetic tests exercise parsers, handlers and SDK transports. They do not establish live access, deployment success or application UI compatibility. Run separate live and intended-client checks before release.
