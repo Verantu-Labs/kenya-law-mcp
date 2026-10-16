@@ -71,6 +71,8 @@ Use the [Worker MCP URL](https://kenya-law-mcp.robinskarani1.workers.dev/mcp) in
 
 Local builds and tests do not deploy this branch. A remote server can still expose older tool definitions.
 
+The `/mcp` URL is a protocol endpoint, not a web page. Opening it in a browser sends GET and returns 405 with `No server event stream is available`. MCP clients use POST. Use `/health` for a browser health check; it does not check legal retrieval.
+
 REST example:
 
 ```sh
@@ -81,13 +83,30 @@ curl https://kenya-law-mcp.robinskarani1.workers.dev/api/v1/search_case_law \
 
 The reply is an MCP tool envelope. Check `isError`, then parse `content[0].text` where appropriate. HTTP 200 does not confirm upstream access or citation verification.
 
+## Tool inputs and results
+
+Discover input schemas through MCP `tools/list`, the [OpenAPI schema](openapi.json) or [`TOOLS`](src/index.ts). Search limits default to 10 and are capped at 50. Bulk retrieval processes the first ten URLs, marks individual failures and sets top-level `isError` if any document fails.
+
+For example, call `get_akn_document` with:
+
+```json
+{
+  "akn_url": "/akn/ke/act/2010/constitution/eng@2010-09-03",
+  "article": "50"
+}
+```
+
+The server reads AKN XML, HTML, supported DOCX files and PDFs with extractable text. It also renders court directories, which are discovery records rather than judgments. Relative AKN paths are resolved against Kenya Law; absolute document URLs and redirects must use approved HTTPS paths on `kenyalaw.org` or `new.kenyalaw.org`.
+
+Document tools return Markdown. Search, bulk and verification tools return JSON inside `content[0].text`. Check `isError` before parsing, and render JSON fields as text rather than HTML. A readable PDF without identifying metadata cannot confirm a citation. See [source text handling](docs/architecture.md#source-text-and-rendering).
+
 ## Research sequence
 
 1. Search with explicit court/year/station filters, or call `search_legislation` with an Act title.
 2. Retrieve returned AKN identifiers with `get_akn_document`; inspect any requested section/article.
 3. Use `verify_citation` for record matching. `check_citator` reports `not_checked` for judicial treatment; it does not establish whether a decision remains good law.
 
-Directory listings and metadata do not establish a holding. Consult official text and the [documented limitations](README.md#errors-and-inherited-limitations).
+Directory listings and metadata do not establish a holding. Consult official text and the [retrieval limits](docs/architecture.md#retrieval).
 
 Queries and URLs go to Kenya Law and, when using a remote server, through its host. This server does not need local legal workspaces or client documents. Avoid confidential facts in search queries.
 
