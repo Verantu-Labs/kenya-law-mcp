@@ -49,6 +49,9 @@ Thumbs.db
 docs/*
 !docs/architecture.md
 !docs/development.md
+!docs/examples/
+docs/examples/*
+!docs/examples/hakiki.md
 
 # Local scratch files
 post.txt

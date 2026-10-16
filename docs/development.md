@@ -40,6 +40,14 @@ git diff --check
 
 Generic retrieval belongs here; application-specific orchestration, accounts, private fixtures and internal services do not. Endpoint lists in generated schemas are configuration metadata rather than host health checks. Legacy Smithery/desktop manifests do not prove marketplace publication or one-click installation. The package is `private: true`; do not assume `npx @verantu-labs/kenya-law-mcp` installs a registry release.
 
+## Sharing an example
+
+If your project uses Kenya Law MCP, you are welcome to credit it and open a pull request adding `docs/examples/<project>.md`. This is voluntary, not a license condition.
+
+Include a project link, the MCP transport and tools used, where retrieval fits in your workflow, and what you have actually tested. Keep it short and state any known failures or limits. Use [Hakiki](examples/hakiki.md) as a reference. Do not include credentials, private documents or personal information.
+
+Documentation is allowlisted in `.gitignore`. Add an exception for your example file alongside the Hakiki entry; leave unrelated local documentation ignored.
+
 ## Review and release
 
 Use a small cohesive branch. Describe the problem, resulting behavior, actual checks and remaining limitations. Review staged files and commit history for secrets, private paths, proprietary dependencies and internal endpoints before publication. Keep local state, logs, bundles and dependency folders out of Git.

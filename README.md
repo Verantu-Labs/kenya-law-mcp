@@ -45,6 +45,8 @@ For HTTP clients, the hosted MCP URL is `https://kenya-law-mcp.robinskarani1.wor
 
 Input schemas are available through MCP `tools/list` and [OpenAPI](openapi.json). See [request examples and result handling](guide.md#tool-inputs-and-results).
 
+See [Hakiki](docs/examples/hakiki.md) for an integration example. If you use this server, a link back and an [example contribution](docs/development.md#sharing-an-example) are welcome, but optional.
+
 Search is not exhaustive. Retrieved text and citation matches do not establish current legal validity. Scanned PDFs require OCR, which is not included. Avoid confidential facts in queries. See [retrieval and security limits](docs/architecture.md).
 
 ## Development
